@@ -11,6 +11,11 @@ CREATE TABLE IF NOT EXISTS kvss_kvs (
 	UNIQUE(eid, key, val)
 );
 '''
+#CREATE INDEX IF NOT EXISTS idx_eid ON kvss_kvs(eid);
+#CREATE INDEX IF NOT EXISTS idx_key ON kvss_kvs(key);
+#CREATE INDEX IF NOT EXISTS idx_kvs ON kvss_kvs(key, val);
+
+
 
 import sqlite3
 import os
@@ -29,6 +34,10 @@ _q_cr_tmp_view = "CREATE TEMP VIEW %s AS %s"
 _q_cr_tmp_table = "CREATE TEMP TABLE %s AS %s"
 _q_create_temp = None
 
+_q_drop_view = "DROP VIEW %s"
+_q_drop_table = "DROP TABLE %s"
+_q_drop_temp = None
+
 _q_select_filtered_ids = '''
 SELECT DISTINCT eid AS id
 	FROM %s
@@ -45,11 +54,12 @@ SELECT eid, key, val
 
 class  KvssSQL(object):
 	def __init__(self, connstr=os.path.realpath('kvss.db'), debug=False, tempstore="VIEW"):
-		global _q_create_temp
+		global _q_create_temp, _q_drop_temp
 		self._con = con = sqlite3.connect(connstr)
 		self._debug = debug
 		self._ctx = []
 		_q_create_temp = _q_cr_tmp_table if tempstore == "TABLE" else _q_cr_tmp_view
+		_q_drop_temp = _q_drop_table if tempstore == "TABLE" else _q_drop_view
 		con.executescript(_schema)
 
 	def _insert_kvs(self, d, unique=True):
@@ -129,13 +139,22 @@ class  KvssSQL(object):
 		q = _q_create_temp % (ctx_kvs, s1)
 		con.execute(q)
 
+		con.commit()
+
 	def _ctx_pop(self):
-		pass
+		if not self._ctx:
+			return
+		con = self._con
+		ctx_ids = self._ctx_ids()
+		ctx_kvs = self._ctx_kvs()
+		self._ctx.pop()
+		con.execute(_q_drop_temp % ctx_ids)
+		con.execute(_q_drop_temp % ctx_kvs)
+		con.commit()
 
 class KvssShell(object):
 	def __init__(self, kvss):
 		self._kvss = kvss
-		self._path = "/"
 		self._key = None
 
 	def entries(self):
@@ -151,24 +170,33 @@ class KvssShell(object):
 		if len(cmd) < 2:
 			return
 		x = cmd[1]
+		if x == '..':
+			self._cd_pop()
+		else:
+			self._cd_push(x)
+
+	def _cd_push(self, x):
 		kvss = self._kvss
 		if self._key is None:
 			for k in kvss._iterate_keys():
 				if k == x:
 					self._key = x
-					self._path += x
 					return
-			else:
-				print "%s does not exist" % x
 		else:
 			for v in kvss._iterate_vals(self._key):
 				if v == x:
 					kvss._ctx_push(self._key, v)
 					self._key = None
-					self._path += "=%s/" % v
 					return
-			else:
-				print "%s does not exist" % x
+		print "%s does not exist" % x
+
+	def _cd_pop(self):
+		kvss = self._kvss
+		if self._key is None:
+			kvss._ctx_pop()
+		else:
+			self._key = None
+
 
 	def ls(self):
 		kvss = self._kvss
@@ -183,12 +211,22 @@ class KvssShell(object):
 		print "%s: Unknown command" % self._cmd[0]
 
 	def go(self):
+		kvss = self._kvss
+		ctx = kvss._ctx
 		while True:
+
+			prompt = '/'.join([''] + [ '%s=%s' % (x[0],x[1]) for x in ctx ] + [''])
+			if self._key:
+				prompt += '%s' % self._key
 			try:
-				cmd = self._cmd = raw_input(self._path + '> ').split()
+				cmd = self._cmd = raw_input(prompt + '> ').split()
 			except EOFError:
 				print
 				break
+
+			if len(cmd) == 0:
+				continue
+
 			if cmd[0] == 'entries':
 				self.entries()
 			elif cmd[0] == 'ls':
