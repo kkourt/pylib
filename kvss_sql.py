@@ -14,11 +14,11 @@ CREATE TABLE IF NOT EXISTS kvss_kvs (
 
 import sqlite3
 import os
-from itertools import izip
 
 _q_insert_id = "INSERT INTO kvss_ids DEFAULT VALUES"
 _q_associate_kv = "INSERT INTO kvss_kvs (eid, key, val) VALUES (?,?,?)"
 
+_q_count_kvs = "SELECT count(key) FROM kvss_kvs WHERE eid = \"%s\""
 _q_select_lrid = "SELECT last_insert_rowid()"
 _q_select_kvs = "SELECT key,val FROM \"%s\" WHERE eid = \"%s\""
 _q_select_keys = "SELECT DISTINCT key FROM \"%s\""
@@ -31,7 +31,7 @@ _q_create_temp = None
 
 _q_select_filtered_ids = '''
 SELECT DISTINCT eid AS id
-	FROM %s 
+	FROM %s
 	WHERE key="%s" AND val="%s"
 '''
 
@@ -52,20 +52,39 @@ class  KvssSQL(object):
 		_q_create_temp = _q_cr_tmp_table if tempstore == "TABLE" else _q_cr_tmp_view
 		con.executescript(_schema)
 
-	def _insert_kvs(self, d):
+	def _insert_kvs(self, d, unique=True):
 		""" insert list-of-dicts """
 		con = self._con
 		con.execute(_q_insert_id)
 		id = con.execute(_q_select_lrid).next()[0]
 
-		for k,v in d.iteritems():
+		entry = tuple( d.iteritems() )
+		if unique and tuple(self.find(entry)):
+			if self._debug:
+				print "entry:", d, "exists => ignoring"
+			return
+
+		for k,v in entry:
 			con.execute(_q_associate_kv, (id, k, v))
-	
+
 		con.commit()
+
+	def find(self, tot):
+		con = self._con
+
+		h = "SELECT id FROM kvss_ids,"
+		m_t = "(SELECT eid AS id%d FROM kvss_kvs WHERE key=\"%s\" AND val=\"%s\")"
+		m = ',\n'.join([ m_t % (i, tot[i][0], tot[i][1]) for i in xrange(len(tot)) ])
+		e = " AND ".join([ "id%d == id" % (i) for i in xrange(len(tot)) ])
+		q = h + m + " WHERE " + e
+
+		for (id,) in con.execute(q):
+			if con.execute(_q_count_kvs % id).next()[0] == len(tot):
+				yield id
 
 	def _ctx_ids(self):
 		return "kvss_ids" if not self._ctx else ("TMP_IDS%d" % len(self._ctx))
-	
+
 	def _ctx_kvs(self):
 		return "kvss_kvs" if not self._ctx else ("TMP_KVS%d" % len(self._ctx))
 
@@ -74,26 +93,26 @@ class  KvssSQL(object):
 		q = _q_select_ids % ids
 		for e in self._con.execute(q):
 			yield e[0]
-	
+
 	def _iterate_keys(self,ctx=True):
 		kvs = self._ctx_kvs() if ctx else "kvss_kvs"
 		for k in self._con.execute(_q_select_keys % kvs):
 			yield k[0]
-	
+
 	def _iterate_vals(self, key, ctx=True):
 		kvs = self._ctx_kvs() if ctx else "kvss_kvs"
 		for v in self._con.execute(_q_select_vals % (kvs,key)):
 			yield v[0]
-	
+
 	def _iter_entry_kv(self, id, ctx=True):
 		kvs = self._ctx_kvs() if ctx else "kvss_kvs"
 		q = _q_select_kvs % (kvs, str(id))
 		for x in self._con.execute(q):
 			yield (x[0], x[1])
-	
+
 	def _get_entry(self, id):
 		return [ "%s:%s" % x for x in self._iterate_entry_kv(id) ]
-	
+
 	def _ctx_push(self, key, val):
 		con = self._con
 
@@ -126,7 +145,7 @@ class KvssShell(object):
 			for k, v in kvss._iter_entry_kv(id):
 				print ("%s:%s" % (k,v)),
 			print "]"
-	
+
 	def cd(self):
 		cmd = self._cmd
 		if len(cmd) < 2:
@@ -192,6 +211,6 @@ if __name__ == '__main__':
 	kvss = KvssSQL(debug=True)
 	for d in _tmp_lod:
 		kvss._insert_kvs(d)
-	
+
 	sh = KvssShell(kvss)
 	sh.go()
