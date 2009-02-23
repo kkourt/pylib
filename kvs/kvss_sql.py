@@ -85,6 +85,12 @@ SELECT eid, key, val
 	      AND (key <> "%s" AND val <> "%s")
 '''
 
+_q_select_filtered_ids_exclude = '''
+SELECT DISTINCT eid AS id
+	FROM %s
+	EXCEPT SELECT DISTINCT eid AS id FROM %s WHERE key="%s"
+'''
+
 _q_select_ds = "SELECT ds FROM kvss_ds WHERE ds=\"%s\""
 _q_insert_ds = "INSERT INTO kvss_ds(ds)  VALUES(?)"
 
@@ -212,7 +218,10 @@ class  KvssSQL(object):
 			ctx_ids = self._ctx_ids(hid_new)
 			ctx_kvs = self._ctx_kvs(hid_new)
 
-			s0 = _q_select_filtered_ids % (ctx_kvs_prev, key, val)
+			if len(val) > 0:
+				s0 = _q_select_filtered_ids % (ctx_kvs_prev, key, val)
+			else:
+				s0 = _q_select_filtered_ids_exclude % (ctx_kvs_prev, ctx_kvs_prev, key)
 			q = _q_create_ro % (ctx_ids, s0)
 			#print q
 			con.execute(q)
@@ -228,6 +237,8 @@ class  KvssSQL(object):
 
 		con.commit()
 		con.isolation_level = old_isolation_level
+		if len(val) == 0:
+			val = "None"
 		self._ctx.append((key,val))
 		self._ctx_hids.append(hid_new)
 
@@ -271,7 +282,15 @@ class KvssShell(object):
 
 	def _cd_push(self, x):
 		kvss = self._kvss
-		if self._key is None:
+		if x[0] == '!':
+			if self._key is not None:
+				print "not command in key context not supported"
+				return
+			for k in kvss._iterate_keys():
+				if k == x[1:]:
+					kvss._ctx_push(k, '')
+					return
+		elif self._key is None:
 			for k in kvss._iterate_keys():
 				if k == x:
 					self._key = x
