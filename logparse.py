@@ -38,7 +38,7 @@ class LogParser(object):
 	re_ws = re.compile(r'^\s+$')
 	re_assign = re.compile(r'^\s+(\w\S*)\s*=\s*([^#\n]+).*$')
 	re_flush = re.compile(r'^\s+flush\s*$')
-	re_clear = re.compile(r'^\s+clear\s*$')
+	re_clear = re.compile(r'^\s+clear((?:\s+\w+){0,})\s*$')
 
 	def __init__(self, parse_data, debug=False):
 		self._debug = debug
@@ -82,7 +82,11 @@ class LogParser(object):
 
 			match = re_clear.match(l)
 			if match is not None:
-				commands.append(('CL',))
+				cl_cmd = [ "CL" ]
+				terms, = match.groups()
+				if terms:
+					cl_cmd.append(terms.split())
+				commands.append(cl_cmd)
 				continue
 				
 			raise ValueError, "parse error <%s> (not an assignment/flush)" % l[:-1]
@@ -117,8 +121,17 @@ class LogParser(object):
 				self.data.append(dict(self._current_data))
 			elif command[0] == 'CL':
 				if self._debug:
-					print 'CLEAR'
-				self._current_data.clear()
+					print 'CLEAR',
+				if len(command) == 1:
+					if self._debug:
+						print 'ALL'
+					self._current_data.clear()
+				else:
+					if self._debug:
+						print 'TERMS: ', ' '.join(command[1])
+					for term in command[1]:
+						if term in self._current_data:
+							del self._current_data[term]
 			elif command[0] == '=':
 				lterm, rterm = command[1:]
 				rterm = match.expand(rterm)
