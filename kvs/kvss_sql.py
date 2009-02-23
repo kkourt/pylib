@@ -20,6 +20,11 @@ CREATE TABLE IF NOT EXISTS kvss_hier (
 	FOREIGN KEY(pid) REFERENCES kvss_hier(hid)
 );
 
+CREATE TABLE IF NOT EXISTS kvss_ds (
+	ds	TEXT NOT NULL,
+	UNIQUE(ds)
+);
+
 CREATE INDEX IF NOT EXISTS idx_eid ON kvss_kvs(eid);
 CREATE INDEX IF NOT EXISTS idx_key ON kvss_kvs(key);
 CREATE INDEX IF NOT EXISTS idx_kvs ON kvss_kvs(key, val);
@@ -80,6 +85,8 @@ SELECT eid, key, val
 	      AND (key <> "%s" AND val <> "%s")
 '''
 
+_q_select_ds = "SELECT ds FROM kvss_ds WHERE ds=\"%s\""
+_q_insert_ds = "INSERT INTO kvss_ds(ds)  VALUES(?)"
 
 class  KvssSQL(object):
 	def __init__(self, connstr=os.path.realpath('kvss.db'), debug=False, tempstore="VIEW"):
@@ -109,7 +116,7 @@ class  KvssSQL(object):
 
 		con.commit()
 
-	def _insert_kvs_many(self, datasource, lod):
+	def _insert_kvs_many(self, lod):
 		cur = self._con.cursor()
 		cur_exec = cur.execute
 		cur_execmany = cur.executemany
@@ -117,9 +124,21 @@ class  KvssSQL(object):
 			cur_exec(_q_insert_id)
 			id = cur_exec(_q_select_lrid).next()[0]
 			cur_execmany(_q_associate_kv, ( (id, k, v) for (k,v) in d.iteritems()))
-			#for k,v in d.iteritems():
-			#	cur_exec(_q_associate_kv, (id, k, v))
 		self._con.commit()
+
+	def insert_kvs_ds(self, lod, datasource):
+		con = self._con
+		q = _q_select_ds % datasource
+		res = list(con.execute(q))
+		if res:
+			print "datasource %s exists: doing nothing" % datasource
+			return
+		self._clear_ro_cache()
+		self._insert_kvs_many(lod)
+		con.execute(_q_insert_ds, (datasource,))
+		con.commit()
+
+
 
 	def find(self, tot):
 		con = self._con
@@ -271,7 +290,6 @@ class KvssShell(object):
 			kvss._ctx_pop()
 		else:
 			self._key = None
-
 
 	def ls(self):
 		kvss = self._kvss
