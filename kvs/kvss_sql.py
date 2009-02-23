@@ -20,14 +20,14 @@ CREATE TABLE IF NOT EXISTS kvss_hier (
 	FOREIGN KEY(pid) REFERENCES kvss_hier(hid)
 );
 
-
+CREATE INDEX IF NOT EXISTS idx_eid ON kvss_kvs(eid);
+CREATE INDEX IF NOT EXISTS idx_key ON kvss_kvs(key);
+CREATE INDEX IF NOT EXISTS idx_kvs ON kvss_kvs(key, val);
 '''
-#CREATE INDEX IF NOT EXISTS idx_eid ON kvss_kvs(eid);
-#CREATE INDEX IF NOT EXISTS idx_key ON kvss_kvs(key);
-#CREATE INDEX IF NOT EXISTS idx_kvs ON kvss_kvs(key, val);
 
 import sqlite3
 import os
+from itertools import repeat
 
 _q_insert_id = "INSERT INTO kvss_ids DEFAULT VALUES"
 _q_associate_kv = "INSERT INTO kvss_kvs (eid, key, val) VALUES (?,?,?)"
@@ -57,6 +57,12 @@ _q_cr_ro_view = "CREATE VIEW %s AS %s"
 _q_cr_ro_table = "CREATE TABLE %s AS %s"
 _q_create_ro = None
 
+_q_create_ro_idx = '''
+	CREATE INDEX IF NOT EXISTS %s_idx_eid ON %s(eid);
+	CREATE INDEX IF NOT EXISTS %s_idx_key ON %s(key);
+	CREATE INDEX IF NOT EXISTS %s_idx_kvs ON %s(key, val);
+'''
+
 _q_drop_view = "DROP VIEW %s"
 _q_drop_table = "DROP TABLE %s"
 _q_drop_ro = None
@@ -78,8 +84,7 @@ SELECT eid, key, val
 class  KvssSQL(object):
 	def __init__(self, connstr=os.path.realpath('kvss.db'), debug=False, tempstore="VIEW"):
 		global _q_create_ro, _q_drop_ro
-		# http://bugs.python.org/issue4995
-		self._con = con = sqlite3.connect(connstr,isolation_level=None)
+		self._con = con = sqlite3.connect(connstr)
 		self._debug = debug
 		self._ctx = []
 		self._ctx_hids = []
@@ -103,6 +108,18 @@ class  KvssSQL(object):
 			con.execute(_q_associate_kv, (id, k, v))
 
 		con.commit()
+
+	def _insert_kvs_many(self, datasource, lod):
+		cur = self._con.cursor()
+		cur_exec = cur.execute
+		cur_execmany = cur.executemany
+		for d in lod:
+			cur_exec(_q_insert_id)
+			id = cur_exec(_q_select_lrid).next()[0]
+			cur_execmany(_q_associate_kv, ( (id, k, v) for (k,v) in d.iteritems()))
+			#for k,v in d.iteritems():
+			#	cur_exec(_q_associate_kv, (id, k, v))
+		self._con.commit()
 
 	def find(self, tot):
 		con = self._con
@@ -159,6 +176,9 @@ class  KvssSQL(object):
 	def _ctx_push(self, key, val):
 		con = self._con
 		hid = self._ctx_hid()
+		# http://bugs.python.org/issue4995
+		old_isolation_level = con.isolation_level
+		con.isolation_level = None
 
 		q_check = _q_select_hier % (hid, key, val)
 		#print q_check
@@ -182,8 +202,13 @@ class  KvssSQL(object):
 			#print q
 			q = _q_create_ro % (ctx_kvs, s1)
 			con.execute(q)
-			con.commit()
 
+			q = _q_create_ro_idx % tuple(x for x in repeat(ctx_kvs, 6))
+			con.executescript(q)
+
+
+		con.commit()
+		con.isolation_level = old_isolation_level
 		self._ctx.append((key,val))
 		self._ctx_hids.append(hid_new)
 
