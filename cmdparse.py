@@ -4,6 +4,8 @@ import sys
 import StringIO
 import readline as rl
 
+_lex_extra_chars = '-/.'
+
 class CmdParser(object):
 	commands = ("echo", "help")
 	def __init__(self, *args, **kwargs):
@@ -23,7 +25,12 @@ class CmdParser(object):
 			if rl.get_begidx() == 0:
 				self._completions = filter(lambda s: s.find(text) == 0, self.cmds)
 			else:
-				self._completions = []
+				input = rl.get_line_buffer()
+				lex = shlex.shlex(input, posix=True)
+				lex.wordchars += _lex_extra_chars
+				token = lex.get_token()
+				comp_fn = getattr(self, 'complete_' + token, lambda x: [])
+				self._completions = comp_fn(lex)
 		if state < len(self._completions):
 			return self._completions[state]
 		else:
@@ -31,7 +38,7 @@ class CmdParser(object):
 
 	def parse(self, input):
 		lex = shlex.shlex(input, posix=True)
-		lex.wordchars += '-/.'
+		lex.wordchars += _lex_extra_chars
 		token = lex.get_token()
 		if token not in self.cmds:
 			ret = "Available Commands: %s" % ' '.join(self.cmds)
