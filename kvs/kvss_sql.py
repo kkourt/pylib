@@ -267,6 +267,15 @@ class KvssShell(CmdParser, CmdPyParser):
 		super(KvssShell, self).__init__(*args, **kwargs)
 		self._namespace["kvss"] = kvss
 
+	def _list_iter(self):
+		kvss = self._kvss
+		if self._key is None:
+			for k in kvss._iterate_keys():
+				yield k
+		else:
+			for v in kvss._iterate_vals(self._key):
+				yield v
+
 	def parse_entries(self, lex):
 		""" list entries at this specific context """
 		kvss = self._kvss
@@ -275,6 +284,18 @@ class KvssShell(CmdParser, CmdPyParser):
 			for k, v in kvss._iter_entry_kv(id):
 				print ("%s:%s" % (k,v)),
 			print "]"
+
+	def complete_cd(self, lex):
+		x = lex.get_token()
+		x_next = lex.get_token()
+		if x_next:
+			return []
+
+		if not x:
+			return [l for l in self._list_iter()]
+		else:
+			xlen = len(x)
+			return filter(lambda l: x == l[:xlen], (self._list_iter() ))
 
 	def parse_cd(self, lex):
 		""" enter a key/value (depending on the context) """
@@ -322,13 +343,8 @@ class KvssShell(CmdParser, CmdPyParser):
 
 	def parse_ls(self, lex):
 		""" list available keys or vals (depending on the context) """
-		kvss = self._kvss
-		if self._key is None:
-			for k in kvss._iterate_keys():
-				print k
-		else:
-			for v in kvss._iterate_vals(self._key):
-				print v
+		for l in self._list_iter():
+			print l
 
 	def go(self):
 		kvss = self._kvss
