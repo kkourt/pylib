@@ -31,7 +31,7 @@ class CmdParser(object):
 
 	def parse(self, input):
 		lex = shlex.shlex(input, posix=True)
-		lex.wordchars += '-/'
+		lex.wordchars += '-/.'
 		token = lex.get_token()
 		if token not in self.cmds:
 			ret = "Available Commands: %s" % ' '.join(self.cmds)
@@ -77,10 +77,14 @@ class CmdCodeConsole(code.InteractiveConsole):
 class CmdPyParser(object):
 	commands = ("__python__",)
 
+	def __init__(self, *args, **kwargs):
+		self._namespace = {}
+		super(CmdPyParser, self).__init__(*args, **kwargs)
+
 	def parse_python(self, lex):
 		""" python interactive mode """
 		buff = StringIO.StringIO()
-		console = CmdCodeConsole({})
+		console = CmdCodeConsole(self._namespace)
 		prompt = ">>> "
 		while True:
 			input = raw_input(prompt)
@@ -111,4 +115,5 @@ if __name__ == '__main__':
 	rl.parse_and_bind('tab: complete')
 	while True:
 		input = raw_input("> ")
-		print myparser.parse(input)
+		ret = myparser.parse(input)
+		print ret
