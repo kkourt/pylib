@@ -4,7 +4,7 @@ import sys
 import StringIO
 import readline as rl
 
-_lex_extra_chars = '-/.'
+_lex_extra_chars = '-/.,!='
 
 class CmdParser(object):
 	commands = ("echo", "help")
@@ -65,6 +65,8 @@ class CmdParser(object):
 			cmds = self.cmds
 
 		ret = ""
+		cmds = list(cmds)
+		cmds.sort()
 		for cmd in cmds:
 			if cmd not in self.cmds:
 				ret += "%-12s : unknown\n" % cmd
