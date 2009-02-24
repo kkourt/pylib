@@ -256,12 +256,19 @@ class  KvssSQL(object):
 		con.execute("DELETE FROM kvss_hier WHERE 1")
 		con.commit()
 
-class KvssShell(object):
-	def __init__(self, kvss):
-		self._kvss = kvss
-		self._key = None
 
-	def entries(self):
+from cmdparse import CmdParser, CmdPyParser
+import readline as rl
+class KvssShell(CmdParser, CmdPyParser):
+	commands = ("entries", "ls", "cd", "clear_cache")
+	def __init__(self, *args, **kwargs):
+		self._kvss = kwargs.get("kvss")
+		self._key = None
+		super(KvssShell, self).__init__(*args, **kwargs)
+		self._namespace["kvss"] = kvss
+
+	def parse_entries(self, lex):
+		""" list entries at this specific context """
 		kvss = self._kvss
 		for id in kvss._iterate_entries():
 			print id, " [",
@@ -269,15 +276,19 @@ class KvssShell(object):
 				print ("%s:%s" % (k,v)),
 			print "]"
 
-	def cd(self):
-		cmd = self._cmd
-		if len(cmd) < 2:
+	def parse_cd(self, lex):
+		""" enter a key/value (depending on the context) """
+		x = lex.get_token()
+		if not x:
 			return
-		x = cmd[1]
 		if x == '..':
 			self._cd_pop()
 		else:
 			self._cd_push(x)
+
+	def parse_clear_cache(self, lex):
+		""" drop the cache tables """
+		self._kvss._clear_ro_cache()
 
 	def _cd_push(self, x):
 		kvss = self._kvss
@@ -309,7 +320,8 @@ class KvssShell(object):
 		else:
 			self._key = None
 
-	def ls(self):
+	def parse_ls(self, lex):
+		""" list available keys or vals (depending on the context) """
 		kvss = self._kvss
 		if self._key is None:
 			for k in kvss._iterate_keys():
@@ -318,38 +330,25 @@ class KvssShell(object):
 			for v in kvss._iterate_vals(self._key):
 				print v
 
-	def default(self):
-		print "%s: Unknown command" % self._cmd[0]
-
 	def go(self):
 		kvss = self._kvss
 		ctx = kvss._ctx
+		rl.set_history_length(1000)
+		rl.parse_and_bind('tab: complete')
 		while True:
-
 			prompt = '/'.join([''] + [ '%s=%s' % (x[0],x[1]) for x in ctx ] + [''])
 			if self._key:
 				prompt += '%s' % self._key
 			try:
-				cmd = self._cmd = raw_input(prompt + '> ').split()
+				cmd = raw_input(prompt + '> ')
 			except EOFError:
 				print
 				break
+			out = self.parse(cmd)
+			if out is not None:
+				print out
 
-			if len(cmd) == 0:
-				continue
 
-			if cmd[0] == 'entries':
-				self.entries()
-			elif cmd[0] == 'ls':
-				self.ls()
-			elif cmd[0] == 'cd':
-				self.cd()
-			elif cmd[0] == 'clear_cache':
-				self._kvss._clear_ro_cache()
-			elif cmd[0] == 'exit':
-				break
-			else:
-				self.default()
 
 if __name__ == '__main__':
 	_tmp_lod = (
@@ -363,5 +362,6 @@ if __name__ == '__main__':
 	for d in _tmp_lod:
 		kvss._insert_kvs(d)
 
-	sh = KvssShell(kvss)
-	sh.go()
+	kvss_sh = KvssShell(kvss=kvss)
+	kvss_sh.go()
+
