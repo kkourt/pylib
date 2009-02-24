@@ -95,7 +95,7 @@ _q_select_ds = "SELECT ds FROM kvss_ds WHERE ds=\"%s\""
 _q_insert_ds = "INSERT INTO kvss_ds(ds)  VALUES(?)"
 
 class  KvssSQL(object):
-	def __init__(self, connstr=os.path.realpath('kvss.db'), debug=False, tempstore="VIEW"):
+	def __init__(self, connstr=os.path.realpath('kvss.db'), debug=False, tempstore="TABLE"):
 		global _q_create_ro, _q_drop_ro
 		self._con = con = sqlite3.connect(connstr)
 		self._debug = debug
@@ -107,16 +107,15 @@ class  KvssSQL(object):
 
 	def _insert_kvs(self, d, unique=True):
 		""" insert list-of-dicts """
-		con = self._con
-		con.execute(_q_insert_id)
-		id = con.execute(_q_select_lrid).next()[0]
-
 		entry = tuple( d.iteritems() )
 		if unique and tuple(self.find(entry)):
 			if self._debug:
 				print "entry:", d, "exists => ignoring"
 			return
 
+		con = self._con
+		con.execute(_q_insert_id)
+		id = con.execute(_q_select_lrid).next()[0]
 		for k,v in entry:
 			con.execute(_q_associate_kv, (id, k, v))
 
