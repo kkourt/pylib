@@ -94,16 +94,24 @@ SELECT DISTINCT eid AS id
 _q_select_ds = "SELECT ds FROM kvss_ds WHERE ds=\"%s\""
 _q_insert_ds = "INSERT INTO kvss_ds(ds)  VALUES(?)"
 
+import types
+
 class  KvssSQL(object):
+	class _CTX(types.ListType):
+		def __init__(self, *args, **kwargs):
+			super(KvssSQL._CTX,self).__init__(*args, **kwargs)
+			self.__hids = []
+
 	def __init__(self, connstr=os.path.realpath('kvss.db'), debug=False, tempstore="TABLE"):
 		global _q_create_ro, _q_drop_ro
 		self._con = con = sqlite3.connect(connstr)
 		self._debug = debug
-		self._ctx = []
-		self._ctx_hids = []
 		_q_create_ro = _q_cr_ro_table if tempstore == "TABLE" else _q_cr_ro_view
 		_q_drop_ro = _q_drop_table if tempstore == "TABLE" else _q_drop_view
 		con.executescript(_schema)
+
+	def get_context(self):
+		return self._CTX()
 
 	def _insert_kvs(self, d, unique=True):
 		""" insert list-of-dicts """
@@ -158,38 +166,38 @@ class  KvssSQL(object):
 			if con.execute(_q_count_kvs % id).next()[0] == len(tot):
 				yield id
 
-	def _ctx_hid(self):
-		ctx_hids = self._ctx_hids
+	def _ctx_hid(self, ctx):
+		ctx_hids = ctx._CTX__hids
 		return ctx_hids[-1] if ctx_hids else 0
 
-	def _ctx_ids(self,hid=None):
+	def _ctx_ids(self, ctx, hid=None):
 		if hid is None:
-			hid = self._ctx_hid()
+			hid = self._ctx_hid(ctx)
 		return "kvss_ids" if hid == 0 else ("RO_IDS_%d" % hid)
 
-	def _ctx_kvs(self,hid=None):
+	def _ctx_kvs(self, ctx, hid=None):
 		if hid is None:
-			hid = self._ctx_hid()
+			hid = self._ctx_hid(ctx)
 		return "kvss_kvs" if hid == 0 else ("RO_KVS_%d" % hid)
 
-	def _iterate_entries(self,ctx=True):
-		ids = self._ctx_ids() if ctx else "kvss_ids"
+	def _iterate_entries(self,ctx):
+		ids = self._ctx_ids(ctx) if ctx else "kvss_ids"
 		q = _q_select_ids % ids
 		for e in self._con.execute(q):
 			yield e[0]
 
-	def _iterate_keys(self,ctx=True):
-		kvs = self._ctx_kvs() if ctx else "kvss_kvs"
+	def _iterate_keys(self,ctx):
+		kvs = self._ctx_kvs(ctx) if ctx else "kvss_kvs"
 		for k in self._con.execute(_q_select_keys % kvs):
 			yield k[0]
 
-	def _iterate_vals(self, key, ctx=True):
-		kvs = self._ctx_kvs() if ctx else "kvss_kvs"
+	def _iterate_vals(self, key, ctx):
+		kvs = self._ctx_kvs(ctx) if ctx else "kvss_kvs"
 		for v in self._con.execute(_q_select_vals % (kvs,key)):
 			yield v[0]
 
-	def _iter_entry_kv(self, id, ctx=True):
-		kvs = self._ctx_kvs() if ctx else "kvss_kvs"
+	def _iter_entry_kv(self, id, ctx=None):
+		kvs = self._ctx_kvs(ctx) if ctx else "kvss_kvs"
 		q = _q_select_kvs % (kvs, str(id))
 		for x in self._con.execute(q):
 			yield (x[0], x[1])
@@ -197,9 +205,9 @@ class  KvssSQL(object):
 	def _get_entry(self, id):
 		return [ "%s:%s" % x for x in self._iterate_entry_kv(id) ]
 
-	def _ctx_push(self, key, val):
+	def _ctx_push(self, ctx, key, val):
 		con = self._con
-		hid = self._ctx_hid()
+		hid = self._ctx_hid(ctx)
 		# http://bugs.python.org/issue4995
 		old_isolation_level = con.isolation_level
 		con.isolation_level = None
@@ -213,9 +221,9 @@ class  KvssSQL(object):
 			con.execute(_q_insert_hier, (hid, key, val))
 			hid_new = con.execute(_q_select_lrid).next()[0]
 
-			ctx_kvs_prev = self._ctx_kvs(hid)
-			ctx_ids = self._ctx_ids(hid_new)
-			ctx_kvs = self._ctx_kvs(hid_new)
+			ctx_kvs_prev = self._ctx_kvs(ctx, hid)
+			ctx_ids = self._ctx_ids(ctx, hid_new)
+			ctx_kvs = self._ctx_kvs(ctx, hid_new)
 
 			if len(val) > 0:
 				s0 = _q_select_filtered_ids % (ctx_kvs_prev, key, val)
@@ -233,19 +241,19 @@ class  KvssSQL(object):
 			q = _q_create_ro_idx % tuple(x for x in repeat(ctx_kvs, 6))
 			con.executescript(q)
 
-
 		con.commit()
 		con.isolation_level = old_isolation_level
 		if len(val) == 0:
 			val = "None"
-		self._ctx.append((key,val))
-		self._ctx_hids.append(hid_new)
+		ctx.append((key,val))
+		ctx._CTX__hids.append(hid_new)
+		return ctx
 
-	def _ctx_pop(self):
-		if not self._ctx:
+	def _ctx_pop(self, ctx):
+		if not ctx:
 			return
-		self._ctx.pop()
-		self._ctx_hids.pop()
+		ctx.pop()
+		ctx._CTX__hids.pop()
 
 	def _clear_ro_cache(self):
 		con = self._con
@@ -265,21 +273,22 @@ class KvssShell(CmdParser, CmdPyParser):
 		self._kvss = kwargs.get("kvss")
 		self._key = None
 		super(KvssShell, self).__init__(*args, **kwargs)
-		self._namespace["kvss"] = kvss
+		self._namespace["kvss"] = self._kvss
+		self._ctx = self._kvss.get_context()
 
 	def _list_iter(self):
 		kvss = self._kvss
 		if self._key is None:
-			for k in kvss._iterate_keys():
+			for k in kvss._iterate_keys(self._ctx):
 				yield k
 		else:
-			for v in kvss._iterate_vals(self._key):
+			for v in kvss._iterate_vals(self._key, self._ctx):
 				yield v
 
 	def parse_entries(self, lex):
 		""" list entries at this specific context """
 		kvss = self._kvss
-		for id in kvss._iterate_entries():
+		for id in kvss._iterate_entries(self._ctx):
 			print id, " [",
 			for k, v in kvss._iter_entry_kv(id):
 				print ("%s:%s" % (k,v)),
@@ -292,7 +301,8 @@ class KvssShell(CmdParser, CmdPyParser):
 			return []
 
 		if not x:
-			return [l for l in self._list_iter()]
+			ret = [l for l in self._list_iter()]
+			return ret
 		else:
 			xlen = len(x)
 			return filter(lambda l: x == l[:xlen], (self._list_iter() ))
@@ -301,8 +311,10 @@ class KvssShell(CmdParser, CmdPyParser):
 		""" enter a key/value (depending on the context) """
 		x = lex.get_token()
 		if not x:
-			return
-		if x == '..':
+			levels = len(self._ctx)
+			for i in xrange(levels):
+				self._cd_pop()
+		elif x == '..':
 			self._cd_pop()
 		else:
 			self._cd_push(x)
@@ -319,17 +331,17 @@ class KvssShell(CmdParser, CmdPyParser):
 				return
 			for k in kvss._iterate_keys():
 				if k == x[1:]:
-					kvss._ctx_push(k, '')
+					kvss._ctx_push(self._ctx, k, '')
 					return
 		elif self._key is None:
-			for k in kvss._iterate_keys():
+			for k in kvss._iterate_keys(self._ctx):
 				if k == x:
 					self._key = x
 					return
 		else:
-			for v in kvss._iterate_vals(self._key):
+			for v in kvss._iterate_vals(self._key, self._ctx):
 				if v == x:
-					kvss._ctx_push(self._key, v)
+					kvss._ctx_push(self._ctx, self._key, v)
 					self._key = None
 					return
 		print "%s does not exist" % x
@@ -337,7 +349,7 @@ class KvssShell(CmdParser, CmdPyParser):
 	def _cd_pop(self):
 		kvss = self._kvss
 		if self._key is None:
-			kvss._ctx_pop()
+			kvss._ctx_pop(self._ctx)
 		else:
 			self._key = None
 
@@ -348,7 +360,7 @@ class KvssShell(CmdParser, CmdPyParser):
 
 	def go(self):
 		kvss = self._kvss
-		ctx = kvss._ctx
+		ctx = self._ctx
 		rl.set_history_length(1000)
 		rl.parse_and_bind('tab: complete')
 		while True:
@@ -364,15 +376,13 @@ class KvssShell(CmdParser, CmdPyParser):
 			if out is not None:
 				print out
 
-
-
 if __name__ == '__main__':
 	_tmp_lod = (
 		{ 'owner': 'kornilios', 'type':'PC', 'processor':'AMD' },
 		{ 'owner': 'kornilios', 'type':'Laptop', 'processor':'Intel' },
 		{ 'owner': 'kornilios', 'type':'CAR', 'brand':'Peugeot' },
-		{ 'owner': 'vkoukis', 'type':'PC', 'processor':'INTEL' },
-		{ 'owner': 'gtsouk', 'type':'CAR', 'brand':'KIA'}
+		{ 'owner': 'vkoukis', 'type':'PC', 'processor':'Intel' },
+		{ 'owner': 'gtsouk', 'type':'CAR', 'brand':'KIA' }
 	)
 	kvss = KvssSQL(debug=True)
 	for d in _tmp_lod:
