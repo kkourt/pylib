@@ -1,10 +1,7 @@
-import shlex
 import code
 import sys
 import StringIO
 import readline as rl
-
-_lex_extra_chars = '-/.,!='
 
 class CmdParser(object):
 	commands = ("echo", "help")
@@ -26,20 +23,22 @@ class CmdParser(object):
 				self._completions = filter(lambda s: s.find(text) == 0, self.cmds)
 			else:
 				input = rl.get_line_buffer()
-				lex = shlex.shlex(input, posix=True)
-				lex.wordchars += _lex_extra_chars
-				token = lex.get_token()
+				tokens = input.split()
+				token = tokens.pop(0)
 				comp_fn = getattr(self, 'complete_' + token, lambda x: [])
-				self._completions = comp_fn(lex)
+				self._completions = comp_fn(tokens)
 		if state < len(self._completions):
 			return self._completions[state]
 		else:
 			return None
 
 	def parse(self, input):
-		lex = shlex.shlex(input, posix=True)
-		lex.wordchars += _lex_extra_chars
-		token = lex.get_token()
+		tokens = input.split()
+		try:
+			token = tokens.pop(0)
+		except IndexError:
+			token = ''
+
 		if token not in self.cmds:
 			ret = "Available Commands: %s" % ' '.join(self.cmds)
 		else:
@@ -48,18 +47,18 @@ class CmdParser(object):
 				ret = "Errror : parse_%s not implemented" % token
 			else:
 				rl.set_completer()
-				ret = fn(lex)
+				ret = fn(tokens)
 				rl.set_completer(self._complete)
 		return ret
 
-	def parse_echo(self, lex):
+	def parse_echo(self, tokens):
 		""" Just return the input """
-		return ' '.join([t for t in lex])
+		return ' '.join([t for t in tokens])
 
-	def parse_help(self, lex):
+	def parse_help(self, tokens):
 		""" Print command help """
 		cmds = []
-		for t in lex:
+		for t in tokens:
 			cmds.append(t)
 		if not cmds:
 			cmds = self.cmds
@@ -90,7 +89,7 @@ class CmdPyParser(object):
 		self._namespace = {}
 		super(CmdPyParser, self).__init__(*args, **kwargs)
 
-	def parse_python(self, lex):
+	def parse_python(self, tokens):
 		""" python interactive mode """
 		buff = StringIO.StringIO()
 		console = CmdCodeConsole(self._namespace)
