@@ -215,12 +215,40 @@ class  KvssSQL(object):
 		for e in self._con.execute(q):
 			yield e[0]
 
+	def cnt_entries(self, ctx):
+		return reduce(lambda x,y: x+1, self._iterate_entries(ctx), 0)
+
 	def iterate_entries(self, ctx):
 		for id in self._iterate_entries(ctx):
 			entry = {}
 			for k, v in self._iter_entry_kv(ctx, id):
 				entry[k] = v
 			yield entry
+
+	# XXX: Does not seem to give considerable speedup
+	def iterate_entries_keys(self, ctx, *keys):
+		""" iterate entries and vals only for the specified keys.
+		If an entry does not contain the specified key then show
+		nothing.
+		"""
+		nr_keys = len(keys)
+		if nr_keys <= 0:
+			raise ValueError, "keys error: %d" % nr_keys
+
+		_and = " AND " if nr_keys > 1 else " "
+		kvs = self._ctx_kvs(ctx)
+		q = "SELECT kvs0.eid, "  + \
+		','.join((" kvs%d.key, kvs%d.val" % (i,i) for i in xrange(nr_keys))) + \
+		" FROM " + \
+		','.join(( " %s AS kvs%s" % (kvs,i) for i in xrange(nr_keys))) + \
+		" WHERE " + \
+		'AND'.join(( " kvs%d.eid = kvs%d.eid" % (i-1,i) for i in xrange(1,nr_keys))) + \
+		_and + \
+		'AND'.join(( " kvs%d.key = \"%s\" " % (i, keys[i]) for i in xrange(nr_keys)))
+
+		for t in self._con.execute(q):
+			yield dict([ (t[i], t[i+1]) for i in xrange(1, nr_keys*2, 2) ])
+
 
 	def _iterate_keys(self,ctx):
 		kvs = self._ctx_kvs(ctx) if ctx else "kvss_kvs"
@@ -258,7 +286,6 @@ class  KvssSQL(object):
 			ret = True
 		self._ctx_pop(ctx)
 		return ret
-
 
 	def _iter_entry_kv(self, ctx, id):
 		kvs = self._ctx_kvs(ctx) if ctx else "kvss_kvs"
@@ -434,14 +461,16 @@ class KvssCore(object):
 			raise ValueError, "(%s,%s) does not exist in ctx:%s" % (key, val, str(ctx))
 		self._ctx_push(ctx, key, val)
 
-	def ctx_kk_op_iter(self, ctx0, ctx1, k_key, k_val, op_fn):
+	def ctx_kk_op_iter(self, ctx0, ctx1, k_key, k_val, *op_fns):
 		d0 = {}
 		for e0 in self.iterate_entries(ctx0):
 			if (k_key not in e0):
 				raise ValueError, "k_key:%s does not exist in entry:%s" % (k_key, str(e0))
 			if (k_val not in e0):
 				raise ValueError, "k_val:%s does not exist in entry:%s" % (k_val, str(e0))
-			d0[e0[k_key]] = e0[k_val]
+			k = e0[k_key]
+			assert k not in d0
+			d0[k] = e0[k_val]
 
 		d1 = {}
 		for e1 in self.iterate_entries(ctx1):
@@ -449,16 +478,18 @@ class KvssCore(object):
 				raise ValueError, "k_key:%s does not exist in entry:%s" % (k_key, str(e1))
 			if (k_val not in e1):
 				raise ValueError, "k_val:%s does not exist in entry:%s" % (k_val, str(e1))
-			d1[e1[k_key]] = e1[k_val]
+			k = e1[k_key]
+			assert k not in d1
+			d1[k] = e1[k_val]
 
 		r = {}
 		common_keys = set(d0.iterkeys()).intersection(set(d1.iterkeys()))
-		for k in common_keys:
-			yield k, op_fn(d0[k],d1[k])
+		for k in d0.iterkeys():
+			yield k, [fn(d0[k],d1[k]) for fn in op_fns]
 
 		del d0
 		del d1
-		del common_keys
+		#del common_keys
 
 	def ctx_expand_all_iter(self, ctx, key, check_empty=False):
 		""" expand context specified for all values for the specified key.
@@ -517,7 +548,8 @@ class KvssShell(CmdParser, CmdPyParser):
 		self._key = None
 		super(KvssShell, self).__init__(*args, **kwargs)
 		self._namespace["kvss"] = self._kvss
-		self._ctx = self._kvss.get_context()
+		ctx = kwargs.get("ctx", None)
+		self._ctx = self._kvss.get_context(ctx)
 
 	def _list_iter(self):
 		kvss = self._kvss
@@ -542,7 +574,7 @@ class KvssShell(CmdParser, CmdPyParser):
 
 	def parse_cnt(self, tokens):
 		""" count entries """
-		print reduce(lambda x,y: x+1, self._kvss._iterate_entries(self._ctx))
+		print self._kvss.cnt_entries(self._ctx)
 
 	def complete_cd(self, tokens):
 		if not tokens:
@@ -649,4 +681,5 @@ if __name__ == '__main__':
 
 	kvss_sh = KvssShell(kvss=kvss)
 	kvss_sh.go()
+	#ctx = kvss.get_context()
 
