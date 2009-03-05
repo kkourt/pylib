@@ -37,134 +37,74 @@ def _xtics(items):
 	xtics = "set xtics (" + ", ".join(xtics) +")"
 	_g(xtics)
 
-def plot_lps(data, file=None, **kwargs):
-	title = kwargs.get("title", '')
+_terms = {
+	''   : 'png',
+	'png': 'png',
+	'eps': 'postscript'
+}
+def _prepare(file=None, **kwargs):
 	canv_size = kwargs.get("canvas_size", None)
-
+	canv_size = "" if canv_size is None else "size %s,%s" % canv_size
+	title = kwargs.get("title", '')
 	_g("set output '" + file + "'")
-	_g("set style fill solid 1")
 	_g("set title \"%s\"" % title)
 	_g("set key left top")
-
-	if isinstance(data, types.DictType):
-		keys = sorted(data.iterkeys())
-		klen = len(keys)
-		if isinstance(data[keys[0]], types.DictType):
-			# we assume similar structure for all items
-			keys2 = sorted(data[keys[0]])
-			k2len = len(keys2)
-			data = [ [ data[k1][k2] for k1 in keys] for k2 in keys2 ]
-			_xtics(keys2)
-			mkD = partial(G.Data, data, with_="linespoints", filename=file + '.gp')
-			_using = lambda i : "0:%d" % (i+1)
-			ds = [mkD(using=_using(i), title=str(keys[i])) for i in xrange(klen)]
-		else:
-			data = [ data[k] for k in keys ]
-			ds = [ G.Data(data, with_="linespoints", filename=file + '.gp') ]
-			_xtics(keys)
-
-	canv_size = "" if canv_size is None else "size %s,%s" % canv_size
+	_g("set grid")
+	_g("set style fill solid 1")
+	_g("set yrange[*:*]")
 	if file is None:
 		_g("set terminal wxt %s" % canv_size)
 	else:
-		_g("set terminal png %s" % canv_size)
+		_g("set terminal %s %s" % (_terms[file.split('.')[-1]], canv_size))
 
-	fname = file + '.gp'
-	#yrange = kwargs.get("yrange", (y_min,y_max))
-	#_g("set yrange [%s:%s]" % yrange)
+
+_bw_def = 0.15
+def _data_dict(indata, file, with_, **kwargs):
+	keys = sorted(indata.iterkeys())
+	x0 = indata[keys[0]]
+	if isinstance(x0, types.DictType): # check the first element
+		keys2 = sorted(x0) # we assume the same structure for all
+		data = [ [ indata[k1][k2] for k1 in keys] for k2 in keys2 ]
+		_xtics(keys2)
+		if with_ in ("linespoints", "points", "lines"):
+			using_ = lambda i : "0:%d" % (i+1)
+		elif with_ == "boxes":
+			bw = kwargs.get("bw", _bw_def)
+			x_step = bw
+			x_min = -bw*(len(keys)/2.0) + (x_step/2.0)
+			using_ = lambda i : "($0%+f):%d"  % (x_min + x_step*i, i+1)
+		else:
+			raise NotImplementedError
+		mkD = partial(G.Data, data, with_=with_, filename=file + '.gp')
+		ds = [mkD(using=using_(i), title=str(keys[i])) for i in xrange(len(keys))]
+	else:
+		data = [ indata[k] for k in keys ]
+		_xtics(keys)
+		ds = [ G.Data(data, with_=with_, filename=gpfile) ]
+	return ds
+
+def plot_lps(data, file=None, **kwargs):
+	if isinstance(data, types.DictType):
+		ds = _data_dict(data, file, with_="linespoints", **kwargs)
+	_prepare(file, **kwargs)
 	_g.plot(*ds)
 
 def plot_bars(data, file=None, **kwargs):
-	ksort_key = kwargs.get("ksort_key", None)
-	ksort_key2 = kwargs.get("ksort_key2", None)
-	bw = kwargs.get("bw", 0.15)
-	title = kwargs.get("title", '')
-	canv_size = kwargs.get("canvas_size", None)
-
-	_g("set output '" + file + "'")
-	_g("set boxwidth %f" % bw)
-	_g("set style fill solid 1")
-	_g("set title \"%s\"" % title)
-	_g("set key left top")
 	if isinstance(data, types.DictType):
-		keys = sorted(data.iterkeys(), ksort_key)
-
-		klen = len(keys)
-		xtics = ("\"%s\" %d" % (str(keys[i]), i) for i in xrange(klen))
-		xtics = "set xtics (" + ", ".join(xtics) +")"
-		_g(xtics)
-
-		x_step = bw
-		if isinstance(data[keys[0]], types.DictType):
-			# we assume similar structure for all items
-			keys2 = sorted(data[keys[0]], ksort_key2)
-			k2len = len(keys2)
-			data = [ [ data[k1][k2] for k2 in keys2] for k1 in keys ]
-			d_max = max(max(d) for d in data)
-			d_min = min(min(d) for d in data)
-			x_min = -x_step*(k2len/2.0)  +  (x_step/2.0)
-			mkD = partial(G.Data, data, with_="boxes", filename=file + '.gp')
-			_using = lambda i : "($0%+f):%d"  % (x_min + x_step*i, i+1)
-			ds = [mkD(using=_using(i), title=keys2[i]) for i in xrange(k2len)]
-		else:
-			k2len = 1
-			data = [ data[k] for k in keys ]
-			d_max = max(data)
-			d_min = min(data)
-			ds = [ G.Data(data, with_="boxes", filename=file + '.gp') ]
-
-		canv_size = None
-		x_size = klen*k2len*25
-		canv_size = (max(x_size, 650), 500)
-		y_min = 0 # (d_min - (d_max - d_min)*.1)
-		y_max = d_max + (d_max - d_min)*.1
-
-	canv_size = "" if canv_size is None else "size %s,%s" % canv_size
-	if file is None:
-		_g("set terminal wxt %s" % canv_size)
-	else:
-		_g("set terminal png %s" % canv_size)
-
-	fname = file + '.gp'
-	yrange = kwargs.get("yrange", (y_min,y_max))
-	_g("set yrange [%s:%s]" % yrange)
+		ds = _data_dict(data, file, with_="boxes", **kwargs)
+	bw = kwargs.get("bw", _bw_def)
+	_g("set boxwidth %f" % bw)
+	_prepare(file, **kwargs)
 	_g.plot(*ds)
 
-def test_bars():
-	d0 = {1:20, 2:30, 3:35}
-	d1 = {'A':20,  'B':45, 'C':30}
-	d2 = {'A': {'0': 20, '1': 30}, 'B': {'0': 40, '1': 10}}
-	d3 = {
-		'A': {'0': 20, '1': 30, '2': 10, '3': 14},
-		'B': {'0': 40, '1': 10, '2': 27, '3': 32},
-	}
-	d4 = {
-		'A': {'0': 20, '1': 30, '2': 10, '3': 14, '4': 20},
-		'B': {'0': 40, '1': 10, '2': 27, '3': 32, '4': 32},
-		'C': {'0': 40, '1': 10, '2': 27, '3': 32, '4': 32},
-		'D': {'0': 40, '1': 10, '2': 27, '3': 32, '4': 32},
-		'E': {'0': 40, '1': 10, '2': 27, '3': 32, '4': 32},
-		'F': {'0': 40, '1': 10, '2': 27, '3': 32, '4': 32},
-		'G': {'0': 40, '1': 10, '2': 27, '3': 32, '4': 32},
-		'H': {'0': 40, '1': 10, '2': 27, '3': 32, '4': 32},
-		'I': {'0': 40, '1': 10, '2': 27, '3': 32, '4': 32},
-		'J': {'0': 40, '1': 10, '2': 27, '3': 32, '4': 32},
-	}
-	draw_bars(d0, "plots/1.png", title="foola")
-	#draw_bars(d1, "plots/1.png")
-	draw_bars(d2, "plots/2.png")
-	draw_bars(d3, "plots/3.png")
-	draw_bars(d4, "plots/4.png")
 
-def test_data():
-	draw_data(range(100))
+def tests():
+	d0 = {
+		'Pizza'  : {'May': 20, 'June': 17, 'July': 15 },
+		'Burger' : {'May': 13, 'June': 15, 'July': 7  }
+	}
+	plot_bars(d0,"plots/d0-bar.png")
+	plot_lps(d0,"plots/d0-lps.png")
 
 if __name__ == '__main__':
-	#test_bars()
-	d3 = {
-		'0' : {'A' : 10, 'B': 12},
-		'1' : {'A' : 15, 'B': 18},
-		'2' : {'A' : 20, 'B': 22},
-		'3' : {'A' : 28, 'B': 32},
-	}
-	plot_lps(d3, "plots/lp-3.png")
+	tests()
