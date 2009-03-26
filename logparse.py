@@ -86,7 +86,7 @@ class LogParser(object):
 			if command[0] == 'FL':
 				if self._debug:
 					print 'FLUSH'
-				self.data.append(dict(self._current_data))
+				return dict(self._current_data)
 			elif command[0] == 'CL':
 				if self._debug:
 					print 'CLEAR',
@@ -110,18 +110,20 @@ class LogParser(object):
 			else:
 				raise ValueError, "Unknown command: %s" % ','.join(command)
 		
-	def go(self, f):
+	def go_iter(self, f):
 		if self._debug:
 			print 'STARTED PARSING'
-
 		while True:
 			l = f.readline()
 			if l == '':
 				break
-
 			for pattern, commands in self._rules:
 				match = pattern.match(l)
 				if match is not None:
-					self._execute_commands(commands, match)
-				# Only one match (first) allowed
-				continue
+					ret = self._execute_commands(commands, match)
+					if ret is not None:
+						yield ret
+				# Only one match required
+
+	def go(self, f):
+		self.data = list(self.go_iter(f))
