@@ -8,8 +8,9 @@ class LogParser(object):
 	re_flush = re.compile(r'^\s+flush\s*$')
 	re_clear = re.compile(r'^\s+clear((?:\s+\w+){0,})\s*$')
 
-	def __init__(self, parse_data, debug=False):
+	def __init__(self, parse_data, debug=False, globals=None):
 		self._debug = debug
+		self._globals = globals() if globals is None else globals
 		self._rules = []
 		self.lterms = set()
 		self._init(parse_data)
@@ -103,7 +104,7 @@ class LogParser(object):
 			elif command[0] == '=':
 				lterm, rterm = command[1:]
 				rterm = match.expand(rterm)
-				rterm = eval(rterm)
+				rterm = eval(rterm, self._globals)
 				if self._debug:
 					print 'ASSIGN ', lterm, '=', rterm, '--'
 				self._current_data[lterm] = rterm
