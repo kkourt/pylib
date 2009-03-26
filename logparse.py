@@ -1,38 +1,6 @@
 from cStringIO import StringIO
 import re
 
-class Var(object):
-	def __init__(self, name, val):
-		self.name = name
-		self.value = val
-		self.old_value = None
-
-class Vars(object):
-	def __init__(self):
-		self._vars = {}
-		self.data = []
-	
-	def assign(self, name, val):
-		if name not in self._vars:
-			self._vars[name] = Var(name, val)
-			return
-
-		v = self._vars[name]
-		if v.value is not None:
-			self.flush()
-		v.old_value = v.value
-		v.value = val
-
-	def flush(self):
-		d = {}
-		for v in self._vars.itervalues():
-			if v.value is None:
-				d[v.name] = v.old_value
-			else:
-				d[v.name] = v.old_value = v.value
-				v.value = None
-		self.data.append(d)
-
 class LogParser(object):
 	re_regex = re.compile(r'^/(.*)/$')
 	re_ws = re.compile(r'^\s+$')
