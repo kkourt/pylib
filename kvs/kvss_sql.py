@@ -517,6 +517,17 @@ class KvssCore(object):
 					yield ctx_n
 
 
+	def ctx_push_path(self, path, ctx=None):
+		if ctx is None:
+			ctx = self.get_context()
+		paths = path.split('/')
+		assert paths[0] == '' # full path for now
+		assert paths[-1] == ''
+		for path in paths[1:-1]:
+			(key, val) = path.split(':')
+			self.ctx_push(ctx, key, val)
+		return ctx
+
 	def ctx_expand_path(self, path, ctx=None):
 		# /elem_type=double/host=clone/mt_conf=*/method=?/
 		#  ?=> all entries under specified key
