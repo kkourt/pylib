@@ -65,3 +65,17 @@ def hfreq_bdb_iteritems(db):
 
 def bdb_len(db):
 	return reduce(lambda x,y: x+1, bdb_iteritems(db), 0)
+
+def bdb_del_under(db, under):
+	# intended for btree dbs
+	cursor = db.cursor()
+	key = cursor.set_range(under, dlen=0, doff=0)[0]
+	while True:
+		if not key.startswith(under):
+			break
+		cursor.delete()
+		try:
+			key = cursor.next(dlen=0, doff=0)[0]
+		except KeyError:
+			break
+	cursor.close()
