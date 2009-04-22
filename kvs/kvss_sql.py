@@ -296,23 +296,6 @@ class  KvssSQL(object):
 	def _get_entry(self, id):
 		return [ "%s:%s" % x for x in self._iterate_entry_kv(id) ]
 
-	def _ctx_exists(self, ctx, key, val):
-		for k in self._iterate_keys(ctx):
-			if k == key:
-				break
-		else:
-			return False
-
-		# entries with no k in their keys
-		if val == '':
-			return True
-
-		for v in self._iterate_vals(k, ctx):
-			if v == val:
-				return True
-		else:
-			return False
-
 	def _get_push_q(self, key, val, kvs_prev):
 		if len(val) > 0:
 			q = _q_select_filtered_ids % (kvs_prev, key, val)
@@ -402,7 +385,7 @@ class KvssCore(object):
 		if ctx is None:
 			ctx = self.get_context()
 		for k,v in path:
-			if self._ctx_exists(ctx, k, v):
+			if self.ctx_exists(ctx, k, v):
 				self._ctx_push(ctx, k, v)
 			else:
 				return None
@@ -439,6 +422,23 @@ class KvssCore(object):
 		else:
 			raise ValueError, "Unexpected Error"
 
+	def ctx_exists(self, ctx, key, val):
+		for k in self._iterate_keys(ctx):
+			if k == key:
+				break
+		else:
+			return False
+
+		# entries with no k in their keys
+		if val == '':
+			return True
+
+		for v in self._iterate_vals(k, ctx):
+			if v == val:
+				return True
+		else:
+			return False
+
 	def ctx_push(self, ctx, key, val):
 		# special case #1 : '^' (first value) or '$' (last value)
 		if (val == '^') or (val == '$'):
@@ -457,7 +457,7 @@ class KvssCore(object):
 			return self._ctx_push(ctx, key, val, filter_fn)
 
 		# standard case: just use the specified value
-		if not self._ctx_exists(ctx, key, val):
+		if not self.ctx_exists(ctx, key, val):
 			raise ValueError, "(%s,%s) does not exist in ctx:%s" % (key, val, str(ctx))
 		self._ctx_push(ctx, key, val)
 
@@ -576,12 +576,14 @@ class KvssShell(CmdParser, CmdPyParser):
 		toks = set(tokens)
 		ctx = self._ctx
 		kvss = self._kvss
-		for id in kvss._iterate_entries(ctx):
-			print id, " [",
-			for k, v in kvss._iter_entry_kv(ctx, id):
-				if (not toks) or (k in toks):
-					print ("%s:%s" % (k,v)),
-			print "]"
+		for entry in kvss.iterate_entries(ctx):
+			print entry
+		#for id in kvss._iterate_entries(ctx):
+		#	print id, " [",
+		#	for k, v in kvss._iter_entry_kv(ctx, id):
+		#		if (not toks) or (k in toks):
+		#			print ("%s:%s" % (k,v)),
+		#	print "]"
 
 	def parse_cnt(self, tokens):
 		""" count entries """
