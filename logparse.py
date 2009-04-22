@@ -140,7 +140,9 @@ class LogParser(object):
 			elif command[0] == '=':
 				lterm, rterm = command[1:]
 				rterm = match.expand(rterm)
-				rterm = eval(rterm, self._globals)
+				globs = dict(self._globals)
+				globs['__match_obj'] = match
+				rterm = eval(rterm, globs)
 				if self._debug:
 					print 'ASSIGN ', lterm, '=', rterm, '--'
 				self._current_data[lterm] = rterm
