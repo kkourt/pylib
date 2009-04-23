@@ -132,6 +132,7 @@ class  KvssSQL(object):
 	def __init__(self, connstr=os.path.realpath('kvss.db'), debug=False):
 		self._con = con = sqlite3.connect(connstr)
 		self._debug = debug
+		self._info = "sql"
 		con.executescript(_schema)
 
 	def get_context(self, ctx=None):
@@ -547,9 +548,6 @@ class KvssCore(object):
 	def path_from_ctx(ctx):
 		return '/' + '/'.join([ '%s=%s' % (kv[0],kv[1]) for kv in ctx ]) + '/'
 
-class Kvss(KvssCore, KvssSQL):
-	pass
-
 from cmdparse import CmdParser, CmdPyParser
 import readline as rl
 class KvssShell(CmdParser, CmdPyParser):
@@ -668,7 +666,7 @@ class KvssShell(CmdParser, CmdPyParser):
 		rl.set_history_length(1000)
 		rl.parse_and_bind('tab: complete')
 		while True:
-			prompt = '/'.join([''] + [ '%s:%s' % (x[0],x[1]) for x in ctx ] + [''])
+			prompt = kvss._info + ':' + '/'.join([''] + [ '%s:%s' % (x[0],x[1]) for x in ctx ] + [''])
 			if self._key:
 				prompt += '%s' % self._key
 			try:

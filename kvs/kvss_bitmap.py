@@ -23,7 +23,7 @@ class Bitmap(object):
 		assert(f == 0.0)
 		self.shift = int(i)
 		self.mask = (1<<self.shift) - 1
-		self.bits_nr = 0
+		self.last_bit = 0
 
 	def test_bit(self, bit_nr):
 		array = self.array
@@ -32,16 +32,15 @@ class Bitmap(object):
 			return 0
 		return 1 if (array[w_idx] & (1<<(bit_nr & self.mask))) else 0
 
-	def set_bits_nr(self, bits_nr):
-		if bits_nr < self.bits_nr:
+	def set_last_bit(self, last_bit):
+		if last_bit < self.last_bit:
 			raise NotImplementedError
-		newlen = 1 + (bits_nr>>self.shift)
+		newlen = 1 + (last_bit>>self.shift)
 		a = self.array
-		alen = len(array)
+		alen = len(a)
 		if newlen > alen:
 			a.extend(repeat(0, (newlen - alen)))
-		self.bits_nr = bits_nr
-
+		self.last_bit = last_bit
 
 	def set_bit(self, bit_nr):
 		array = self.array
@@ -50,31 +49,41 @@ class Bitmap(object):
 		if w_idx >= array_len:
 			array.extend(repeat(0, (w_idx + 1 - array_len)))
 		array[w_idx] |= (1<<(bit_nr & self.mask))
-		if bit_nr + 1 > self.bits_nr:
-			self.bits_nr = bit_nr + 1
+		if bit_nr > self.last_bit:
+			self.last_bit = bit_nr
 
 	def uset_bit(self, bit_nr):
 		raise NotImplementedError
 
+	def __repr__(self):
+		return "<Bitmap last_bit:%s %s>" % (self.last_bit, self.array)
+
 	def __and__(self, other):
 		ret = Bitmap()
-		nbits_nr = min(self.bits_nr, other.bits_nr)
-		ret.set_bits_nr(nbits_nr)
+		nlast_bit = min(self.last_bit, other.last_bit)
+		ret.set_last_bit(nlast_bit)
 		na, a0, a1 = ret.array, self.array, other.array
 		for i in xrange(len(na)):
 			na[i] = a0[i] & a1[i]
 		return ret
 
-	def __neg__(self):
+	def __eq__(self, other):
+		if self.last_bit != other.last_bit:
+			return False
+		return (self.array == other.array)
+
+	def __invert__(self):
 		ret = Bitmap()
-		bits_nr = self.bits_nr
-		ret.set_bits_nr(bits_nr)
+		last_bit = self.last_bit
+		ret.set_last_bit(last_bit)
 		oa = self.array
 		na = ret.array
 		size = len(na) - 1
+		bmask = (1<<(oa.itemsize*8)) - 1 # ugly hack, to avoid overflow
 		for i in xrange(size):
-			na[i] = ~oa[i]
-		na[size] = (~os[size]) & (~(bits_nr & self.mask))
+			na[i] = bmask & (~oa[i])
+		bmask = (1<<(1 + (last_bit & self.mask))) - 1
+		na[size] = bmask & (~oa[size])
 		return ret
 
 	def iter_set_bits(self):
@@ -88,6 +97,22 @@ class Bitmap(object):
 					yield (widx << shift) + i
 
 import random
+def test_bitmap_all():
+	test_bitmap()
+	test_bitmap_and()
+	test_bitmap_invert()
+
+def test_bitmap_invert(times=1024, ints=1024, maxint=10000):
+	for t in xrange(times):
+		b0 = Bitmap()
+		for i in xrange(ints):
+			n = random.randint(0, maxint)
+			b0.set_bit(n)
+
+		b1 = ~b0
+		b2 = ~b1
+		assert (b0 == b2)
+
 def test_bitmap_and(times=1024, ints=1024, maxint=10000):
 	for t in xrange(times):
 		s0 = set()
@@ -127,9 +152,10 @@ def test_bitmap(times=1024, ints=1024, maxint=100000):
 			i += 1
 
 class KvssBitmap(object):
-	def __init__(self, dbdir):
+	def __init__(self, dbdir='kvss.bmp', debug=False):
 		if not isdir(dbdir):
 			makedirs(dbdir)
+		self._info = "bmp"
 		self._entries_db = rnopen(dbdir + '/entries.db')
 		self._indices_db = btopen(dbdir + '/indices.db')
 
@@ -138,9 +164,9 @@ class KvssBitmap(object):
 
 	def _do_iter_entries(self, bmp=None):
 		edb = self._entries_db
-		e_iter = xrange(1, len(edb) +1) if bmp is None else bmp.iter_set_bits()
+		e_iter = xrange(0, len(edb)) if bmp is None else bmp.iter_set_bits()
 		for e_idx in e_iter:
-			yield e_idx, loads(edb[e_idx])
+			yield e_idx, loads(edb[e_idx + 1])
 
 	def _do_get_bitmap(self, pred_fn, bmp_id, bmp_parent=None):
 		bmp = Bitmap()
@@ -155,6 +181,8 @@ class KvssBitmap(object):
 		if bmp_id in idb:
 			bmp = Bitmap()
 			bmp.array.fromstring(idb[bmp_id])
+			# XXX
+			bmp.set_last_bit(len(self._entries_db)-1)
 		else:
 			pred_fn = lambda e: (key in e)
 			bmp = self._do_get_bitmap(pred_fn, bmp_id)
@@ -167,7 +195,11 @@ class KvssBitmap(object):
 		idb = self._indices_db
 		if bmp_id in idb:
 			return
-		bmp_parent = self._get_bitmap_k(key)
+		bmp = self._get_bitmap_k(key)
+		bmp.set_last_bit(len(self._entries_db)-1)
+		bmp = ~bmp
+		idb[bmp_id] = bmp.array.tostring()
+		idb.sync()
 
 	def _set_bitmap_kv(self, key, val, pred_fn=None):
 		bmp_id = "keys/%s/%s/bitmap" % (key, val)
@@ -186,6 +218,8 @@ class KvssBitmap(object):
 		idb = self._indices_db
 		bmp = Bitmap()
 		bmp.array.fromstring(idb[bmp_id])
+		# XXX
+		bmp.set_last_bit(len(self._entries_db)-1)
 		return bmp
 
 	def _bmp_from_ctx(self, ctx):
@@ -272,12 +306,28 @@ class KvssBitmap(object):
 		for eid, entry in self._do_iter_entries(bmp):
 			yield entry
 
+	def cnt_entries(self, ctx):
+		if not ctx:
+			ret = len(self._entries_db)
+		else:
+			bmp = self._bmp_from_ctx(ctx)
+			ret = reduce(lambda x,y: x+1, bmp.iter_set_bits(), 0)
+		return ret
+
 	def _ctx_push(self, ctx, key, val, filter_fn=None):
-		if filter_fn:
-			pred_fn = lambda x : filter_fn(x[key])
-		self._set_bitmap_kv(key, val)
+		if len(val) > 0:
+			pred_fn = None
+			if filter_fn is not None:
+				pred_fn = lambda x : filter_fn(x[key])
+			self._set_bitmap_kv(key, val, pred_fn)
+		else:
+			self._set_bitmap_notk(key, val)
 		ctx.append((key,val))
 		return ctx
+
+	def _ctx_pop(self, ctx):
+		if ctx:
+			ctx.pop()
 
 if __name__ == '__main__':
 	_tmp_lod = (
@@ -291,7 +341,7 @@ if __name__ == '__main__':
 	class Kvss(KvssCore, KvssBitmap):
 	    pass
 
-	kvss = Kvss(dbdir='kvss.bmp')
+	kvss = Kvss()
 	kvss.insert_kvs_ds(_tmp_lod, 'DS0')
 	kvss_sh = KvssShell(kvss=kvss)
 	kvss_sh.go()
