@@ -33,6 +33,8 @@ class BarsMultiple(object):
 		#self.g("unset logscale y")
 
 def _xtics(items):
+	if isinstance(items[0], types.IntType):
+		return
 	xtics = ("\"%s\" %d" % (str(items[i]), i) for i in xrange(len(items)))
 	xtics = "set xtics (" + ", ".join(xtics) +")"
 	_g(xtics)
@@ -40,7 +42,8 @@ def _xtics(items):
 _terms = {
 	''   : 'png',
 	'png': 'png',
-	'eps': 'postscript'
+	'eps': 'postscript',
+	'tex': 'epslatex'
 }
 def _prepare(file=None, **kwargs):
 	canv_size = kwargs.get("canvas_size", None)
@@ -50,8 +53,13 @@ def _prepare(file=None, **kwargs):
 	_g("set title \"%s\"" % title)
 	_g("set key left top")
 	_g("set grid")
+	_g("set size .9,.9")
 	_g("set style fill solid 1")
-	_g("set yrange[*:*]")
+	yrange = kwargs.get("yrange", None)
+	if yrange is None:
+		_g("set yrange[*:*]")
+	else:
+		_g("set yrange[%f:%f]" % yrange)
 	if file is None:
 		_g("set terminal wxt %s" % canv_size)
 	else:
@@ -63,11 +71,22 @@ def _data_dict(indata, file, with_, **kwargs):
 	keys = sorted(indata.iterkeys())
 	x0 = indata[keys[0]]
 	if isinstance(x0, types.DictType): # check the first element
-		keys2 = sorted(x0) # we assume the same structure for all
-		data = [ [ indata[k1][k2] for k1 in keys] for k2 in keys2 ]
+		if "keys2" in kwargs:
+			keys2 = kwargs["keys2"]
+		else:
+			keys2 = sorted(x0) # we assume the same structure for all
+		try:
+			data = [ [ indata[k1][k2] for k1 in keys] for k2 in keys2 ]
+		except KeyError:
+			raise
 		_xtics(keys2)
-		if with_ in ("linespoints", "points", "lines"):
+		if with_ in ("linespoints", "lines"):
 			using_ = lambda i : "0:%d" % (i+1)
+		elif with_ == "points":
+			for i in xrange(len(keys2)):
+				# use both x and y
+				data[i] = [keys2[i]] + data[i]
+			using_ = lambda i : "($1/(1024.0*1024.0)):%d" % (i+2)
 		elif with_ == "boxes":
 			bw = kwargs.get("bw", _bw_def)
 			x_step = bw
@@ -86,6 +105,12 @@ def _data_dict(indata, file, with_, **kwargs):
 def plot_lps(data, file=None, **kwargs):
 	if isinstance(data, types.DictType):
 		ds = _data_dict(data, file, with_="linespoints", **kwargs)
+	_prepare(file, **kwargs)
+	_g.plot(*ds)
+
+def plot_pnts(data, file=None, **kwargs):
+	if isinstance(data, types.DictType):
+		ds = _data_dict(data, file, with_="points", **kwargs)
 	_prepare(file, **kwargs)
 	_g.plot(*ds)
 
