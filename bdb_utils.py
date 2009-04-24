@@ -69,13 +69,14 @@ def bdb_len(db):
 def bdb_del_under(db, under):
 	# intended for btree dbs
 	cursor = db.cursor()
-	key = cursor.set_range(under, dlen=0, doff=0)[0]
-	while True:
-		if not key.startswith(under):
-			break
-		cursor.delete()
-		try:
+	try:
+		key = cursor.set_range(under, dlen=0, doff=0)[0]
+		while True:
+			if not key.startswith(under):
+				break
+			cursor.delete()
 			key = cursor.next(dlen=0, doff=0)[0]
-		except KeyError:
-			break
-	cursor.close()
+	except KeyError:
+		pass
+	finally:
+		cursor.close()
