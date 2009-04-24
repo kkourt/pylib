@@ -15,6 +15,7 @@ from kvss_sql import KvssShell, KvssCore
 # keys/%s/bitmap     => bitmap for k
 # keys/%s/%s/bitmap  => bitmap for (k,v)
 # keys/%s/%s/keys    => pickled set of keys
+# cache/vals/
 
 class Bitmap(object):
 	def __init__(self):
@@ -71,6 +72,12 @@ class Bitmap(object):
 		if self.last_bit != other.last_bit:
 			return False
 		return (self.array == other.array)
+
+	def __nonzero__(self):
+		for w in self.array:
+			if w != 0:
+				return True
+		return False
 
 	def __invert__(self):
 		ret = Bitmap()
@@ -190,8 +197,8 @@ class KvssBitmap(object):
 			idb.sync()
 		return bmp
 
-	def _set_bitmap_notk(self, key, val):
-		bmp_id = "keys/%s/%s/bitmap" % (key, val)
+	def _set_bitmap_notk(self, key):
+		bmp_id = "keys/%s/%s/bitmap" % (key, '')
 		idb = self._indices_db
 		if bmp_id in idb:
 			return
@@ -243,6 +250,10 @@ class KvssBitmap(object):
 			idb.sync()
 		return keys
 
+	#######################
+	  ### Interface ###
+	#######################
+
 	def _insert_kvs(self, lentries):
 		entries_db = self._entries_db
 		entries_nr = len(entries_db)
@@ -252,15 +263,15 @@ class KvssBitmap(object):
 		for entry in lentries:
 			keys.update(entry.iterkeys())
 			entries_nr += 1
+			for k,v in entry.iteritems():
+				entry[k] = str(v)
 			entries_db[entries_nr] = dumps(entry)
-		indices_db['keys'] = dumps(keys)
-		# delete indices have changed
-		try:
+		if "keys" in indices_db:
 			old_keys = loads(indices_db['keys'])
 			for key in keys.intersection(old_keys):
 				bdb_del_under(indices_db.db, "keys/%s/" % key)
-		except KeyError:
-			pass
+			keys.update(old_keys)
+		indices_db['keys'] = dumps(keys)
 		# delete all cache entries
 		bdb_del_under(indices_db.db, "cache/")
 		entries_db.sync()
@@ -291,7 +302,7 @@ class KvssBitmap(object):
 			ctx_keys.add(key)
 		return iter(keys.difference(ctx_keys))
 
-	def _iterate_vals(self, key, ctx):
+	def _get_vals(self, key, ctx):
 		bmp = self._get_bitmap_k(key)
 		if ctx:
 			ctx_bmp = self._bmp_from_ctx(ctx)
@@ -299,7 +310,26 @@ class KvssBitmap(object):
 		vals = set()
 		for eid, entry in self._do_iter_entries(bmp):
 			vals.add(entry[key])
-		return iter(vals)
+		return vals
+
+	@staticmethod
+	def _ctx_id(ctx):
+		ret = ''
+		if ctx:
+			ret = '/'.join([ '%s=%s' % (kv[0],kv[1]) for kv in ctx ]) + '/'
+		return ret
+
+	def _iterate_vals(self, key, ctx):
+		idb = self._indices_db
+		cid = "cache/vals/" + self._ctx_id(ctx) + key
+		if cid in idb:
+			ret = iter(loads(idb[cid]))
+		else:
+			vals = self._get_vals(key, ctx)
+			idb[cid] = dumps(vals)
+			idb.sync()
+			ret = iter(vals)
+		return ret
 
 	def iterate_entries(self, ctx):
 		bmp = self._bmp_from_ctx(ctx) if ctx else None
@@ -321,13 +351,25 @@ class KvssBitmap(object):
 				pred_fn = lambda x : filter_fn(x[key])
 			self._set_bitmap_kv(key, val, pred_fn)
 		else:
-			self._set_bitmap_notk(key, val)
+			self._set_bitmap_notk(key)
 		ctx.append((key,val))
 		return ctx
 
 	def _ctx_pop(self, ctx):
 		if ctx:
 			ctx.pop()
+
+	def _clear_ro_cache(self):
+		idb = self._indices_db
+		bdb_del_under(idb.db, "cache/")
+		idb.sync()
+
+	def _check_empty(self, ctx, key):
+		self._set_bitmap_notk(key)
+		nctx = ctx + [(key, '')]
+		bmp = self._bmp_from_ctx(nctx)
+		return bool(bmp)
+
 
 if __name__ == '__main__':
 	_tmp_lod = (
