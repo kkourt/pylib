@@ -4,17 +4,6 @@
 from cStringIO import StringIO
 import re
 
-#class SanitizedRepl(object):
-#	def __init__(self, expand):
-#		self.expand = expand
-#	def __call__(self, match):
-#		mygroups = map(re.escape, match.groups())
-#		ret = self.expand
-#		for i in xrange(len(mygroups)):
-#			ret = re.sub(r"\\%d" % (i+1), mygroups[i], ret)
-#		return ret
-#
-
 class LogParser(object):
 	"""
 	LogParser: This class implements a file parser:
