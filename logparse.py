@@ -1,7 +1,87 @@
+#!/usr/bin/env python2.5
+# Kornilios Kourtis <kkourt@cslab.ece.ntua.gr>
+
 from cStringIO import StringIO
 import re
 
+#class SanitizedRepl(object):
+#	def __init__(self, expand):
+#		self.expand = expand
+#	def __call__(self, match):
+#		mygroups = map(re.escape, match.groups())
+#		ret = self.expand
+#		for i in xrange(len(mygroups)):
+#			ret = re.sub(r"\\%d" % (i+1), mygroups[i], ret)
+#		return ret
+#
+
 class LogParser(object):
+	"""
+	LogParser: This class implements a file parser:
+	 - The output of the parser is a list of key-value pairs.
+	 - The parser is configured by the user using a simple language
+	   based on regular expressions.
+	 - It presumes an order in the data of the file (it keeps state
+	   for only one tuple of key-value pairs at a time)
+
+	The user configures the parser by defining regular expressions and
+	a set of commands that are executed when each regex is matched.
+
+	The available commands are:
+	 - assign:  assign a value to a key
+	 - flush:   output a key-value tuple
+	 - clear:   destroy a key
+	 - regexes: execute a set of commands when a regex is matched
+
+	The regular expressions and their commands are defined as:
+	/REGEX0/
+		command0
+		command1
+		...
+
+	/REGEX1/
+		command0
+		command1
+		...
+
+	Assignment ('key=expression'):
+	  - key string representing they key assigned
+	  - expression will be passed to an eval() function.
+	  In the expression the following variables are available:
+	  _gX (_g1,_g2) correspond to the regex groups
+	  __match_obj   corresonds to the match object
+	  contents of globs __init__() argument
+
+	Flush ('flush'): output key,value pairs if any
+
+	Clear ('clear [key0 key1]'):
+	  - Clear contents of keys (no arguments => all keys are cleared)
+
+	Regular Expression: similar to regex patterns
+
+	Example:
+
+	>>> conf_data = '''
+	... /^(\w+) (\w+)$/
+	...     fname = _g1
+	...     lname = _g2
+	...     /^(Helen|Maria).*$/
+	...         message = "Hello " + _g1
+	...     flush
+	...     clear message
+	... '''
+	>>> indata = '''
+	... Helen Smith
+	... Nick Papadopoulos
+	... Jane Doe
+	... '''
+	>>> lp = LogParser(conf_data=conf_data)
+	>>> lp.go(indata)
+	>>> lp.data
+	[{'lname': 'Smith', 'message': 'Hello Helen', 'fname': 'Helen'}, {'lname': 'Papadopoulos', 'fname': 'Nick'}, {'lname': 'Doe', 'fname': 'Jane'}]
+
+	Note that regular expressions need to match the whole line
+	"""
 	re_regex = re.compile(r'^/(.*)/$')
 	re_regex_ws = re.compile(r'^\s+/(.*)/$')
 	re_initial_ws = re.compile(r'^(\s+)')
@@ -10,16 +90,50 @@ class LogParser(object):
 	re_flush = re.compile(r'^\s+flush\s*$')
 	re_clear = re.compile(r'^\s+clear((?:\s+\w+){0,})\s*$')
 
-	def __init__(self, parse_data, debug=False, globals=None):
+	def __init__(self, conf_data, debug=False, globs=None, eof_flush=False):
+		""" Create a LogParser instance.
+
+		conf_data: parser configuration (string or file-like object)
+		debug:     print debug messages
+		globs:     globals for assign right-term evaluation (see eval())
+		eof_flush: flush when encounter an EOF
+		"""
 		self._debug = debug
-		self._globals = globals() if globals is None else globals
+		self._globals = globals() if globs is None else globs
 		self._rules = []
 		self.lterms = set()
-		self._init(parse_data)
+		self._init(conf_data)
 		self._current_data = {}
+		self._eof_flush = eof_flush
 		self.data = []
 
-	def _init_commands(self, parse_data, initial_ws=''):
+	def _init(self, conf_data):
+		""" intialize parser from conf_data """
+		if isinstance(conf_data, str):
+			conf_data = StringIO(conf_data)
+
+		re_regex = self.re_regex
+		re_ws = self.re_ws
+		while True:
+			l = conf_data.readline()
+			if l == '':
+				break
+			if l.startswith('#') or (re_ws.match(l) is not None):
+				continue
+
+			# match a regular expression
+			match = re_regex.match(l)
+			if match is not None:
+				regex_str =  match.groups()[0]
+				regex = self._compile_regex(regex_str)
+				commands = self._init_commands(conf_data)
+				self._rules.append((regex, commands))
+				continue
+
+			raise ValueError, "parse error %s (not a regexp)" % l[:-1]
+
+	def _init_commands(self, conf_data, initial_ws=''):
+		""" Intialize commands for a regular expression """
 		commands = [] # commands for this regular expression
 		re_ws = self.re_ws
 		re_regex = self.re_regex_ws
@@ -28,29 +142,29 @@ class LogParser(object):
 		re_clear = self.re_clear
 
 		# first line
-		pp = parse_data.tell() # previous position
-		l = parse_data.readline()
+		pp = conf_data.tell() # previous position
+		l = conf_data.readline()
 		assert(l.startswith(initial_ws))
 		current_ws = self.re_initial_ws.match(l).groups()[0]
 		assert(len(current_ws) > len(initial_ws))
-		parse_data.seek(pp)
+		conf_data.seek(pp)
 
 		while True:
 			# get next line
-			pp = parse_data.tell()
-			l = parse_data.readline()
+			pp = conf_data.tell()
+			l = conf_data.readline()
 			if l == '':
 				break
 			if not l.startswith(current_ws):
 				# go back
-				parse_data.seek(pp)
+				conf_data.seek(pp)
 				break
 
-			# regular expression command
+			# regular expression command, calls _init_commands() recursively
 			match = re_regex.match(l)
 			if match is not None:
 				regex = self._compile_regex(match.groups()[0])
-				new_commands = self._init_commands(parse_data, current_ws)
+				new_commands = self._init_commands(conf_data, current_ws)
 				commands.append(('RE', regex, new_commands))
 				continue
 
@@ -83,31 +197,9 @@ class LogParser(object):
 
 		return commands
 
-	def _init(self, parse_data):
-		if isinstance(parse_data, str):
-			parse_data = StringIO(parse_data)
-
-		re_regex = self.re_regex
-		re_ws = self.re_ws
-		while True:
-			l = parse_data.readline()
-			if l == '':
-				break
-			if l.startswith('#') or (re_ws.match(l) is not None):
-				continue
-
-			# match a regular expression
-			match = re_regex.match(l)
-			if match is not None:
-				regex_str =  match.groups()[0]
-				regex = self._compile_regex(regex_str)
-				commands = self._init_commands(parse_data)
-				self._rules.append((regex, commands))
-				continue
-
-			raise ValueError, "parse error %s (not a regexp)" % l[:-1]
 
 	def _compile_regex(self, regex):
+		""" wrapper for compiling regular expressions """
 		if self._debug:
 			print "got regex: %s" % regex
 		try:
@@ -119,14 +211,19 @@ class LogParser(object):
 
 
 	def _execute_commands(self, commands, match):
+		""" execute (all) commands for a match """
 		for command in commands:
+			# flush command
 			if command[0] == 'FL':
 				if self._debug:
 					print 'FLUSH'
-				yield dict(self._current_data)
+				if self._current_data:
+					yield dict(self._current_data)
+			# clear command
 			elif command[0] == 'CL':
 				if self._debug:
 					print 'CLEAR',
+				# no arguments, clear all keys
 				if len(command) == 1:
 					if self._debug:
 						print 'ALL'
@@ -134,18 +231,24 @@ class LogParser(object):
 				else:
 					if self._debug:
 						print 'TERMS: ', ' '.join(command[1])
+					# clear only keys in arguments
 					for term in command[1]:
 						if term in self._current_data:
 							del self._current_data[term]
+			# assighment command
 			elif command[0] == '=':
 				lterm, rterm = command[1:]
-				rterm = match.expand(rterm)
+				groups = match.groups()
+				# set up globs, add  match variables and match object
 				globs = dict(self._globals)
+				for i in xrange(len(groups)):
+					globs['_g%d' % (i+1)] = groups[i]
 				globs['__match_obj'] = match
 				rterm = eval(rterm, globs)
 				if self._debug:
 					print 'ASSIGN ', lterm, '=', rterm, '--'
 				self._current_data[lterm] = rterm
+			# regular expression command
 			elif command[0] == 'RE':
 				nregex, ncommands = command[1:]
 				nmatch = nregex.match(match.group(0))
@@ -157,6 +260,10 @@ class LogParser(object):
 				raise ValueError, "Unknown command: %s" % command[0]
 
 	def go_iter(self, f):
+		""" iterator that parses a file object, and yields the
+		    resulting key-value pairs """
+		if isinstance(f, str):
+			f = StringIO(f)
 		if self._debug:
 			print 'STARTED PARSING'
 		while True:
@@ -169,7 +276,15 @@ class LogParser(object):
 					rets = self._execute_commands(commands, match)
 					for ret in rets:
 						yield ret
-				# Only one match required
+		if self._eof_flush:
+			yield dict(self._current_data)
+		if self._debug:
+			print 'ENDED PARSING'
 
 	def go(self, f):
+		""" parses a file object, and put the result in .data """
 		self.data = list(self.go_iter(f))
+
+	if __name__ == '__main__':
+		import doctest
+		doctest.testmod()
