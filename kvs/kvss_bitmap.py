@@ -2,12 +2,12 @@ from cPickle import dumps, loads
 from bsddb import rnopen, btopen
 from os import makedirs
 from os.path import isdir
-from itertools import repeat, imap
-import math
-import array
+from itertools import imap
 
 from bdb_utils import bdb_del_under
 from kvss_sql import KvssShell, KvssCore
+
+from Bitmap import Bitmap
 
 # indices store:
 # datasources        => pickled set of datasources
@@ -16,147 +16,6 @@ from kvss_sql import KvssShell, KvssCore
 # keys/%s/%s/bitmap  => bitmap for (k,v)
 # keys/%s/%s/keys    => pickled set of keys
 # cache/vals/
-
-class Bitmap(object):
-	def __init__(self):
-		self.array = array.array('B')
-		f,i = math.modf(math.log(self.array.itemsize<<3,2))
-		assert(f == 0.0)
-		self.shift = int(i)
-		self.mask = (1<<self.shift) - 1
-		self.last_bit = 0
-
-	def test_bit(self, bit_nr):
-		array = self.array
-		w_idx = bit_nr >> self.shift
-		if w_idx >= len(array):
-			return 0
-		return 1 if (array[w_idx] & (1<<(bit_nr & self.mask))) else 0
-
-	def set_last_bit(self, last_bit):
-		if last_bit < self.last_bit:
-			raise NotImplementedError
-		newlen = 1 + (last_bit>>self.shift)
-		a = self.array
-		alen = len(a)
-		if newlen > alen:
-			a.extend(repeat(0, (newlen - alen)))
-		self.last_bit = last_bit
-
-	def set_bit(self, bit_nr):
-		array = self.array
-		w_idx = bit_nr >> self.shift
-		array_len = len(array)
-		if w_idx >= array_len:
-			array.extend(repeat(0, (w_idx + 1 - array_len)))
-		array[w_idx] |= (1<<(bit_nr & self.mask))
-		if bit_nr > self.last_bit:
-			self.last_bit = bit_nr
-
-	def uset_bit(self, bit_nr):
-		raise NotImplementedError
-
-	def __repr__(self):
-		return "<Bitmap last_bit:%s %s>" % (self.last_bit, self.array)
-
-	def __and__(self, other):
-		ret = Bitmap()
-		nlast_bit = min(self.last_bit, other.last_bit)
-		ret.set_last_bit(nlast_bit)
-		na, a0, a1 = ret.array, self.array, other.array
-		for i in xrange(len(na)):
-			na[i] = a0[i] & a1[i]
-		return ret
-
-	def __eq__(self, other):
-		if self.last_bit != other.last_bit:
-			return False
-		return (self.array == other.array)
-
-	def __nonzero__(self):
-		for w in self.array:
-			if w != 0:
-				return True
-		return False
-
-	def __invert__(self):
-		ret = Bitmap()
-		last_bit = self.last_bit
-		ret.set_last_bit(last_bit)
-		oa = self.array
-		na = ret.array
-		size = len(na) - 1
-		bmask = (1<<(oa.itemsize*8)) - 1 # ugly hack, to avoid overflow
-		for i in xrange(size):
-			na[i] = bmask & (~oa[i])
-		bmask = (1<<(1 + (last_bit & self.mask))) - 1
-		na[size] = bmask & (~oa[size])
-		return ret
-
-	def iter_set_bits(self):
-		array = self.array
-		shift = self.shift
-		wbits = 8*array.itemsize
-		for widx in xrange(len(array)):
-			w = array[widx]
-			for i in xrange(wbits):
-				if w & (1<<i):
-					yield (widx << shift) + i
-
-import random
-def test_bitmap_all():
-	test_bitmap()
-	test_bitmap_and()
-	test_bitmap_invert()
-
-def test_bitmap_invert(times=1024, ints=1024, maxint=10000):
-	for t in xrange(times):
-		b0 = Bitmap()
-		for i in xrange(ints):
-			n = random.randint(0, maxint)
-			b0.set_bit(n)
-
-		b1 = ~b0
-		b2 = ~b1
-		assert (b0 == b2)
-
-def test_bitmap_and(times=1024, ints=1024, maxint=10000):
-	for t in xrange(times):
-		s0 = set()
-		b0 = Bitmap()
-		for i in xrange(ints):
-			n = random.randint(0, maxint)
-			s0.add(n)
-			b0.set_bit(n)
-
-		s1 = set()
-		b1 = Bitmap()
-		for i in xrange(ints):
-			n = random.randint(0, maxint)
-			s1.add(n)
-			b1.set_bit(n)
-
-		s = s0.intersection(s1)
-		l = sorted(s)
-		b = b0 & b1
-		i = 0
-		for x in b.iter_set_bits():
-			assert x == l[i]
-			i += 1
-
-def test_bitmap(times=1024, ints=1024, maxint=100000):
-	for t in xrange(times):
-		rand_set = set()
-		bitmap = Bitmap()
-		for i in xrange(ints):
-			n = random.randint(0, maxint)
-			rand_set.add(n)
-			bitmap.set_bit(n)
-		l = sorted(rand_set)
-		i = 0
-		for x in bitmap.iter_set_bits():
-			assert x == l[i]
-			i += 1
 
 class KvssBitmap(object):
 	def __init__(self, dbdir='kvss.bmp', debug=False):
