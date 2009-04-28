@@ -7,7 +7,7 @@ from itertools import imap
 from bdb_utils import bdb_del_under
 from kvss_sql import KvssShell, KvssCore
 
-from Bitmap import Bitmap
+from cBitmap import Bitmap
 
 # indices store:
 # datasources        => pickled set of datasources
@@ -30,11 +30,11 @@ class KvssBitmap(object):
 
 	def _do_iter_entries(self, bmp=None):
 		edb = self._entries_db
-		e_iter = xrange(0, len(edb)) if bmp is None else bmp.iter_set_bits()
+		e_iter = xrange(0, len(edb)) if bmp is None else list(imap(int, bmp.iter_set_bits()))
 		for e_idx in e_iter:
 			yield e_idx, loads(edb[e_idx + 1])
 
-	def _do_get_bitmap(self, pred_fn, bmp_id, bmp_parent=None):
+	def _do_get_bitmap(self, pred_fn, bmp_parent=None):
 		bmp = Bitmap()
 		for entry_id, entry in self._do_iter_entries(bmp_parent):
 			if pred_fn(entry):
@@ -46,13 +46,12 @@ class KvssBitmap(object):
 		idb = self._indices_db
 		if bmp_id in idb:
 			bmp = Bitmap()
-			bmp.array.fromstring(idb[bmp_id])
-			# XXX
-			bmp.set_last_bit(len(self._entries_db)-1)
+			# Note that we are oversizing the array here
+			bmp.init_frombuffer(idb[bmp_id],len(self._entries_db))
 		else:
 			pred_fn = lambda e: (key in e)
-			bmp = self._do_get_bitmap(pred_fn, bmp_id)
-			idb[bmp_id] = bmp.array.tostring()
+			bmp = self._do_get_bitmap(pred_fn)
+			idb[bmp_id] = str(buffer(bmp))
 			idb.sync()
 		return bmp
 
@@ -62,9 +61,9 @@ class KvssBitmap(object):
 		if bmp_id in idb:
 			return
 		bmp = self._get_bitmap_k(key)
-		bmp.set_last_bit(len(self._entries_db)-1)
+		bmp.expand(len(self._entries_db))
 		bmp = ~bmp
-		idb[bmp_id] = bmp.array.tostring()
+		idb[bmp_id] = str(buffer(bmp))
 		idb.sync()
 
 	def _set_bitmap_kv(self, key, val, pred_fn=None):
@@ -75,17 +74,16 @@ class KvssBitmap(object):
 		bmp_parent = self._get_bitmap_k(key)
 		if pred_fn is None:
 			pred_fn = lambda e: (e[key] == val)
-		bmp = self._do_get_bitmap(pred_fn, bmp_id, bmp_parent)
-		idb[bmp_id] = bmp.array.tostring()
+		bmp = self._do_get_bitmap(pred_fn, bmp_parent)
+		idb[bmp_id] = str(buffer(bmp))
 		idb.sync()
 
 	def _get_bitmap_kv(self, key, val):
 		bmp_id = "keys/%s/%s/bitmap" % (key, val)
 		idb = self._indices_db
 		bmp = Bitmap()
-		bmp.array.fromstring(idb[bmp_id])
-		# XXX
-		bmp.set_last_bit(len(self._entries_db)-1)
+		# Note that we are oversizing the array here
+		bmp.init_frombuffer(idb[bmp_id], len(self._entries_db))
 		return bmp
 
 	def _bmp_from_ctx(self, ctx):
