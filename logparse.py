@@ -4,6 +4,9 @@
 from cStringIO import StringIO
 import re
 
+class StopParsing(Exception):
+	pass
+
 class LogParser(object):
 	"""
 	LogParser: This class implements a file parser:
@@ -21,6 +24,8 @@ class LogParser(object):
 	 - flush:   output a key-value tuple
 	 - clear:   destroy a key
 	 - regexes: execute a set of commands when a regex is matched
+	 - eval:    evaluate (eval()) the argument
+	 - exit:    stop parsing
 
 	The regular expressions and their commands are defined as:
 	/REGEX0/
@@ -39,6 +44,7 @@ class LogParser(object):
 	  In the expression the following variables are available:
 	  _gX (_g1,_g2) correspond to the regex groups
 	  __match_obj   corresonds to the match object
+	  __finpt_obj   corresponds to the current file object
 	  contents of globs __init__() argument
 
 	Flush ('flush'): output key,value pairs if any
@@ -78,6 +84,8 @@ class LogParser(object):
 	re_assign = re.compile(r'^\s+(\w\S*)\s*=\s*([^#\n]+).*$')
 	re_flush = re.compile(r'^\s+flush\s*$')
 	re_clear = re.compile(r'^\s+clear((?:\s+\w+){0,})\s*$')
+	re_eval = re.compile(r'^\s+eval\s+(.*)$')
+	re_exit = re.compile(r'^\s+exit\s*$')
 
 	def __init__(self, conf_data, debug=False, globs=None, eof_flush=False):
 		""" Create a LogParser instance.
@@ -94,6 +102,7 @@ class LogParser(object):
 		self._init(conf_data)
 		self._current_data = {}
 		self._eof_flush = eof_flush
+		self._f = None
 		self.data = []
 
 	def _init(self, conf_data):
@@ -129,6 +138,8 @@ class LogParser(object):
 		re_assign = self.re_assign
 		re_flush = self.re_flush
 		re_clear = self.re_clear
+		re_eval = self.re_eval
+		re_exit = self.re_exit
 
 		# first line
 		pp = conf_data.tell() # previous position
@@ -179,6 +190,18 @@ class LogParser(object):
 				if terms:
 					cl_cmd.append(terms.split())
 				commands.append(cl_cmd)
+				continue
+
+			# exit command
+			match = re_exit.match(l)
+			if match is not None:
+				commands.append(('EXIT', ))
+				continue
+
+			# eval command
+			match = re_eval.match(l)
+			if match is not None:
+				commands.append(('EVAL', match.groups()[0] ))
 				continue
 
 			# Unknown command
@@ -233,10 +256,13 @@ class LogParser(object):
 				for i in xrange(len(groups)):
 					globs['_g%d' % (i+1)] = groups[i]
 				globs['__match_obj'] = match
+				globs['__finpt_obj'] = self._f
+				#globs['__cdata_obj'] = self._current_data
 				rterm = eval(rterm, globs)
 				if self._debug:
 					print 'ASSIGN ', lterm, '=', rterm, '--'
 				self._current_data[lterm] = rterm
+
 			# regular expression command
 			elif command[0] == 'RE':
 				nregex, ncommands = command[1:]
@@ -245,6 +271,26 @@ class LogParser(object):
 					rets = self._execute_commands(ncommands, nmatch)
 					for ret in rets:
 						yield ret
+
+			# eval command
+			elif command[0] == 'EVAL':
+				if self._debug:
+					print 'EVAL '
+				groups = match.groups()
+				cmd = command[1]
+				globs = dict(self._globals)
+				for i in xrange(len(groups)):
+					globs['_g%d' % (i+1)] = groups[i]
+				for k,v in self._current_data.iteritems():
+					globs['_%s' % k ] = v
+				globs['__match_obj'] = match
+				globs['__finpt_obj'] = self._f
+				eval(cmd, globs)
+
+			# exit command
+			elif command[0] == 'EXIT':
+				raise StopParsing
+
 			else:
 				raise ValueError, "Unknown command: %s" % command[0]
 
@@ -253,18 +299,25 @@ class LogParser(object):
 		    resulting key-value pairs """
 		if isinstance(f, str):
 			f = StringIO(f)
+		self._f = f
+
 		if self._debug:
 			print 'STARTED PARSING'
-		while True:
-			l = f.readline()
-			if l == '':
-				break
-			for pattern, commands in self._rules:
-				match = pattern.match(l)
-				if match is not None:
-					rets = self._execute_commands(commands, match)
-					for ret in rets:
-						yield ret
+
+		try:
+			while True:
+				l = f.readline()
+				if l == '':
+					break
+				for pattern, commands in self._rules:
+					match = pattern.match(l)
+					if match is not None:
+						rets = self._execute_commands(commands, match)
+						for ret in rets:
+							yield ret
+		except StopParsing:
+			pass
+
 		if self._eof_flush:
 			yield dict(self._current_data)
 		if self._debug:
