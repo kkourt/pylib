@@ -551,7 +551,7 @@ class KvssCore(object):
 from cmdparse import CmdParser, CmdPyParser
 import readline as rl
 class KvssShell(CmdParser, CmdPyParser):
-	commands = ("entries", "ls", "cd", "cc", "lsc", "cnt")
+	commands = ("entries", "ls", "cd", "cc", "lsc", "cnt", "max")
 	def __init__(self, *args, **kwargs):
 		self._kvss = kwargs.get("kvss")
 		self._key = None
@@ -568,6 +568,29 @@ class KvssShell(CmdParser, CmdPyParser):
 		else:
 			for v in kvss._iterate_vals(self._key, self._ctx):
 				yield v
+
+	def parse_max(self, tokens):
+		""" max() value for all entries given a key (first argument)
+		The second optional argument defines a function to be applied to values (eg float)"""
+		if not tokens:
+			print "key to apply max() required"
+			return
+
+		k = tokens.pop(0)
+		if not tokens:
+			fn = lambda x: x.get(k, None)
+		else:
+			fn = lambda x: None if k not in x else eval("%s(%s)" % (tokens[0],x[k]))
+
+		it = self._kvss.iterate_entries(self._ctx)
+		max_entry = it.next()
+		max_datum = fn(max_entry)
+		for entry in it:
+			datum = fn(entry)
+			if datum > max_datum:
+				max_datum = datum
+				max_entry = entry
+		print "max: %s in entry: %s" % (max_datum, max_entry)
 
 	def parse_entries(self, tokens):
 		""" list entries at this specific context """
