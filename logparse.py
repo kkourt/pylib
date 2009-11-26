@@ -45,7 +45,9 @@ class LogParser(object):
 	  _gX (_g1,_g2) correspond to the regex groups
 	  __match_obj   corresonds to the match object
 	  __finpt_obj   corresponds to the current file object
-	  contents of globs __init__() argument
+	  __globs_obj   corresponds to the actual globs __init__() argument
+	                This is intented for performing updates
+	  contents of globs __init__() argument (this is a copy)
 
 	Flush ('flush'): output key,value pairs if any
 
@@ -285,6 +287,7 @@ class LogParser(object):
 					globs['_%s' % k ] = v
 				globs['__match_obj'] = match
 				globs['__finpt_obj'] = self._f
+				globs['__globs_obj'] = self._globals
 				eval(cmd, globs)
 
 			# exit command
