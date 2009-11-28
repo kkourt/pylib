@@ -548,6 +548,43 @@ class KvssCore(object):
 	def path_from_ctx(ctx):
 		return '/' + '/'.join([ '%s=%s' % (kv[0],kv[1]) for kv in ctx ]) + '/'
 
+	def _ctx_expand(self, paths, ctx, d):
+		p = paths.pop(0)
+		key, val = p.split(':')
+
+		new_ctxs = {}
+		if val != '*' and val != '?':
+			ctx_n = self.get_context(ctx)  # make a copy
+			self.ctx_push(ctx_n, key, val) # push key, val into copy
+			new_ctxs[val] = ctx_n
+		else:
+			for val in self._iterate_vals(key, ctx):
+				ctx_n = self.get_context(ctx)
+				self._ctx_push(ctx_n, key, val)
+				new_ctxs[val] = ctx_n
+			if val == '*' and self._check_empty(ctx, key):
+				ctx_n = self.get_context(ctx)
+				self._ctx_push(ctx_n, key, '')
+				new_ctxs[''] = ctx_n
+
+		for val, ctx_n in new_ctxs.iteritems():
+			dk = "%s:%s" % (key, val)
+			if not paths:
+				d[dk] = ctx_n
+			else:
+				d[dk] = dict()
+				self._ctx_expand(list(paths), ctx_n, d[dk])
+
+	def ctx_expand(self, path, ctx=None):
+		if ctx is None:
+			ctx = self.get_context()
+		paths = path.split('/')
+		assert paths[0] == '' # only full paths for now
+		assert paths[-1] == ''
+		d = dict()
+		self._ctx_expand(paths[1:-1], ctx, d)
+		return d
+
 from cmdparse import CmdParser, CmdPyParser
 import readline as rl
 class KvssShell(CmdParser, CmdPyParser):
