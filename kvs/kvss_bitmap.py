@@ -176,6 +176,14 @@ class KvssBitmap(object):
 			ret = '/'.join([ '%s=%s' % (kv[0],kv[1]) for kv in ctx ]) + '/'
 		return ret
 
+	@staticmethod
+	def _ctx_getval(ctx, key):
+		for k,v in ctx:
+			if k == key:
+				return v
+		else:
+			return None
+
 	def _iterate_vals(self, key, ctx):
 		idb = self._indices_db
 		cid = "cache/vals/" + self._ctx_id(ctx) + key
