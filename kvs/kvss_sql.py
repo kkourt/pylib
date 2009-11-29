@@ -385,6 +385,9 @@ class KvssCore(object):
 	def get_ctx_from_path(self, path, ctx=None):
 		if ctx is None:
 			ctx = self.get_context()
+		if isinstance(path, str):
+			assert path[0] == '/' and path[-1] == '/' # full paths for now
+			path = [ tuple(p.split(':')) for p in path[1:-1].split('/') ]
 		for k,v in path:
 			if self.ctx_exists(ctx, k, v):
 				self._ctx_push(ctx, k, v)
@@ -461,6 +464,17 @@ class KvssCore(object):
 		if not self.ctx_exists(ctx, key, val):
 			raise ValueError, "(%s,%s) does not exist in ctx:%s" % (key, val, str(ctx))
 		self._ctx_push(ctx, key, val)
+
+	def ctx_get_entry(self, ctx, key, val):
+		""" Get a unique entry from a contex. suboptimal, yet handy"""
+		if not self.ctx_exists(ctx, key, val):
+			raise ValueError, "(%s,%s) does not exist in ctx:%s" % (key, val, str(ctx))
+		nctx = self.get_context(ctx)
+		self._ctx_push(nctx, key, val)
+		cnt = self.cnt_entries(nctx)
+		if cnt != 1:
+			raise ValueError, "(%s,%s) does not result in 1 entry (but %d) in ctx:%s)" % (key,val, cnt, str(ctx))
+		return self.iterate_entries(nctx).next()
 
 	def ctx_kk_op_iter(self, ctx0, ctx1, k_key, k_val, *op_fns):
 		d0 = {}
@@ -550,7 +564,11 @@ class KvssCore(object):
 
 	def _ctx_expand(self, paths, ctx, d):
 		p = paths.pop(0)
-		key, val = p.split(':')
+		try:
+			key, val = p.split(':')
+		except ValueError:
+			print "Can't split -->%s<--" % (p,)
+			raise
 
 		new_ctxs = {}
 		if val != '*' and val != '?':
@@ -719,6 +737,7 @@ class KvssShell(CmdParser, CmdPyParser):
 		""" list available cache entries (depending on the context) """
 		for i in self._kvss._iterate_cache(self._ctx, self._key):
 			print i
+
 
 	def go(self):
 		kvss = self._kvss

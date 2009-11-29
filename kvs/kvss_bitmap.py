@@ -200,6 +200,7 @@ class KvssBitmap(object):
 		bmp = self._bmp_from_ctx(ctx) if ctx else None
 		for eid, entry in self._do_iter_entries(bmp):
 			yield entry
+	ientries = iterate_entries
 
 	def cnt_entries(self, ctx):
 		if not ctx:
