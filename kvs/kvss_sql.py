@@ -562,7 +562,7 @@ class KvssCore(object):
 	def path_from_ctx(ctx):
 		return '/' + '/'.join([ '%s=%s' % (kv[0],kv[1]) for kv in ctx ]) + '/'
 
-	def _ctx_expand(self, paths, ctx, d):
+	def _ctx_expand(self, paths, ctx, d_prev, dk_prev):
 		p = paths.pop(0)
 		try:
 			key, val = p.split(':')
@@ -570,28 +570,35 @@ class KvssCore(object):
 			print "Can't split -->%s<--" % (p,)
 			raise
 
-		new_ctxs = {}
+		# single entry
 		if val != '*' and val != '?':
 			ctx_n = self.get_context(ctx)  # make a copy
 			self.ctx_push(ctx_n, key, val) # push key, val into copy
-			new_ctxs[val] = ctx_n
-		else:
-			for val in self._iterate_vals(key, ctx):
-				ctx_n = self.get_context(ctx)
-				self._ctx_push(ctx_n, key, val)
-				new_ctxs[val] = ctx_n
-			if val == '*' and self._check_empty(ctx, key):
-				ctx_n = self.get_context(ctx)
-				self._ctx_push(ctx_n, key, '')
-				new_ctxs[''] = ctx_n
+			dk = dk_prev + '/' + key + ":" + val
+			if not paths:
+				d_prev[dk] = ctx_n
+			else:
+				self._ctx_expand(list(paths), ctx_n, d_prev, dk)
+			return
 
+		new_ctxs = {}
+		for val in self._iterate_vals(key, ctx):
+			ctx_n = self.get_context(ctx)
+			self._ctx_push(ctx_n, key, val)
+			new_ctxs[val] = ctx_n
+		if val == '*' and self._check_empty(ctx, key):
+			ctx_n = self.get_context(ctx)
+			self._ctx_push(ctx_n, key, '')
+			new_ctxs[''] = ctx_n
+
+		d = d_prev[dk_prev] = dict()
 		for val, ctx_n in new_ctxs.iteritems():
 			dk = "%s:%s" % (key, val)
 			if not paths:
 				d[dk] = ctx_n
 			else:
 				d[dk] = dict()
-				self._ctx_expand(list(paths), ctx_n, d[dk])
+				self._ctx_expand(list(paths), ctx_n, d, dk)
 
 	def ctx_expand(self, path, ctx=None):
 		if ctx is None:
@@ -600,7 +607,7 @@ class KvssCore(object):
 		assert paths[0] == '' # only full paths for now
 		assert paths[-1] == ''
 		d = dict()
-		self._ctx_expand(paths[1:-1], ctx, d)
+		self._ctx_expand(paths[1:-1], ctx, d, '')
 		return d
 
 from cmdparse import CmdParser, CmdPyParser
