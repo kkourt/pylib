@@ -395,6 +395,10 @@ class KvssCore(object):
 				return None
 		return ctx
 
+	def path_iterate_entries(self, path):
+		ctx = self.get_ctx_from_path(path)
+		return self.iterate_entries(ctx)
+
 	def _ineq_filter(self, op, rterm):
 		(ineq_t, ineq_rterm) = self.re_ineq_rterm.match(rterm).groups()
 		ineq_t = self.ineq_types[ineq_t]
