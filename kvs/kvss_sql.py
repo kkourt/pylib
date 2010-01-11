@@ -399,6 +399,8 @@ class KvssCore(object):
 		ctx = self.get_ctx_from_path(path)
 		return self.iterate_entries(ctx)
 
+	path_ientries = path_iterate_entries
+
 	def _ineq_filter(self, op, rterm):
 		(ineq_t, ineq_rterm) = self.re_ineq_rterm.match(rterm).groups()
 		ineq_t = self.ineq_types[ineq_t]
@@ -469,12 +471,16 @@ class KvssCore(object):
 			raise ValueError, "(%s,%s) does not exist in ctx:%s" % (key, val, str(ctx))
 		self._ctx_push(ctx, key, val)
 
-	def ctx_get_entry(self, ctx, key, val):
+	def ctx_pop(self, ctx):
+		self._ctx_pop(ctx)
+
+	def ctx_get_entry(self, ctx, key=None, val=None):
 		""" Get a unique entry from a contex. suboptimal, yet handy"""
-		if not self.ctx_exists(ctx, key, val):
-			raise ValueError, "(%s,%s) does not exist in ctx:%s" % (key, val, str(ctx))
 		nctx = self.get_context(ctx)
-		self._ctx_push(nctx, key, val)
+		if key != None: # push key,val
+			if not self.ctx_exists(ctx, key, val):
+				raise ValueError, "(%s,%s) does not exist in ctx:%s" % (key, val, str(ctx))
+			self._ctx_push(nctx, key, val)
 		cnt = self.cnt_entries(nctx)
 		if cnt != 1:
 			raise ValueError, "(%s,%s) does not result in 1 entry (but %d) in ctx:%s)" % (key,val, cnt, str(ctx))
@@ -565,6 +571,14 @@ class KvssCore(object):
 	@staticmethod
 	def path_from_ctx(ctx):
 		return '/' + '/'.join([ '%s=%s' % (kv[0],kv[1]) for kv in ctx ]) + '/'
+
+	@staticmethod
+	def val_from_ctx(ctx,key):
+		for p in ctx:
+			if key == p[0]:
+				return p[1]
+		else:
+			raise Exception, "key: %s not found in ctx: %s" % (key, str(ctx))
 
 	def _ctx_expand(self, paths, ctx, d_prev, dk_prev):
 		p = paths.pop(0)
