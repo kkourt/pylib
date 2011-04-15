@@ -2,6 +2,11 @@ import code
 import sys
 import StringIO
 import readline as rl
+import shlex
+
+def do_split(string):
+	#return string.split()
+	return shlex.split(string)
 
 class CmdParser(object):
 	commands = ("echo", "help")
@@ -22,8 +27,8 @@ class CmdParser(object):
 			if rl.get_begidx() == 0:
 				self._completions = filter(lambda s: s.find(text) == 0, self.cmds)
 			else:
-				input = rl.get_line_buffer()
-				tokens = input.split()
+				inp = rl.get_line_buffer()
+				tokens = do_split(inp)
 				token = tokens.pop(0)
 				comp_fn = getattr(self, 'complete_' + token, lambda x: [])
 				self._completions = comp_fn(tokens)
@@ -32,8 +37,8 @@ class CmdParser(object):
 		else:
 			return None
 
-	def parse(self, input):
-		tokens = input.split()
+	def parse(self, inp):
+		tokens = do_split(inp)
 		try:
 			token = tokens.pop(0)
 		except IndexError:
