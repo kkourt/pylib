@@ -388,6 +388,7 @@ class KvssCore(object):
 		if isinstance(path, str):
 			assert path[0] == '/' and path[-1] == '/' # full paths for now
 			path = [ tuple(p.split(':')) for p in path[1:-1].split('/') ]
+
 		for k,v in path:
 			if self.ctx_exists(ctx, k, v):
 				self._ctx_push(ctx, k, v)
@@ -449,13 +450,13 @@ class KvssCore(object):
 		else:
 			return False
 
-	def ctx_push(self, ctx, key, val):
+	def ctx_push(self, ctx, key, val, sort_key=None):
 		# special case #1 : '^' (first value) or '$' (last value)
 		if (val == '^') or (val == '$'):
 			vals = [ v for v in self._iterate_vals(key, ctx) ]
 			if len(vals) == 0:
 				raise ValueError, "k=%s does not have values in %s" % (key, ctx)
-			vals.sort()
+			vals.sort(key=sort_key)
 			vidx = 0 if val == '^' else -1
 			return self._ctx_push(ctx, key, vals[vidx])
 
