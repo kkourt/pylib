@@ -39,9 +39,20 @@ class StatList(list):
 			fn = lambda x: x
 		self._fn = fn
 
+	def setfn(self, fn):
+		self._fn = fn
+
 	@property
 	def max(self):
 		return max(map(self._fn,self))
+
+	@property
+	def avg_plus(self):
+		return self.max - self.avg
+
+	@property
+	def avg_minus(self):
+		return self.avg - self.min
 
 	@property
 	def min(self):
