@@ -17,8 +17,10 @@ class MultiFiles(object):
 
            files_iter: iterator of multiple files
            start_msg : function to print message when a new file starts
-                       (is called with the name of the file as argument)
+                       (is called with the name of the file as argument).
            end_msg   : similar to start_msg
+
+           WARNING: start_msg, end_msg should not return an empty string
         """
         self._files_iter = files_iter
         self._start_msg  = start_msg
@@ -84,6 +86,7 @@ class LogParser(object):
 	  __finpt_obj   corresponds to the current file object
 	  __globs_obj   corresponds to the actual globs __init__() argument
 	                This is intented for performing updates
+	  __cdata_obj   corresponds to the current data (assigned variables)
 	  contents of globs __init__() argument (this is a copy)
 
 	Flush ('flush'): output key,value pairs if any
@@ -296,7 +299,8 @@ class LogParser(object):
 					globs['_g%d' % (i+1)] = groups[i]
 				globs['__match_obj'] = match
 				globs['__finpt_obj'] = self._f
-				#globs['__cdata_obj'] = self._current_data
+				globs['__globs_obj'] = self._globals
+				globs['__cdata_obj'] = self._current_data
 
 				try:
 					rterm = eval(rterm, globs)
@@ -331,6 +335,7 @@ class LogParser(object):
 				globs['__match_obj'] = match
 				globs['__finpt_obj'] = self._f
 				globs['__globs_obj'] = self._globals
+				globs['__cdata_obj'] = self._current_data
 				eval(cmd, globs)
 
 			# exit command
