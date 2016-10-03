@@ -1,4 +1,4 @@
-#!/usr/bin/env python2.5
+#!/usr/bin/env python2
 # Kornilios Kourtis <kkourt@cslab.ece.ntua.gr>
 
 from cStringIO import StringIO
@@ -363,6 +363,8 @@ class LogParser(object):
 				for pattern, commands in self._rules:
 					match = pattern.match(l)
 					if match is not None:
+                                                if self._debug:
+                                                    print "MATCHED: %s" % l
 						rets = self._execute_commands(commands, match)
 						for ret in rets:
 							yield ret
