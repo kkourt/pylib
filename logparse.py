@@ -1,7 +1,16 @@
 #!/usr/bin/env python2
 # Kornilios Kourtis <kkourt@cslab.ece.ntua.gr>
 
-from cStringIO import StringIO
+from __future__ import print_function
+import sys
+
+if sys.version_info[0] == 2:
+    from cStringIO import StringIO
+elif sys.version_info[0] == 3:
+    from io import StringIO
+    xrange = range
+
+
 import re
 
 class StopParsing(Exception):
@@ -114,8 +123,8 @@ class LogParser(object):
 	... '''
 	>>> lp = LogParser(conf_data=conf_data)
 	>>> lp.go(indata)
-	>>> lp.data
-	[{'lname': 'Smith', 'message': 'Hello Helen', 'fname': 'Helen'}, {'lname': 'Papadopoulos', 'fname': 'Nick'}, {'lname': 'Doe', 'fname': 'Jane'}]
+	>>> lp.data == [{'lname': 'Smith', 'message': 'Hello Helen', 'fname': 'Helen'}, {'lname': 'Papadopoulos', 'fname': 'Nick'}, {'lname': 'Doe', 'fname': 'Jane'}]
+        True
 
 	Note that regular expressions need to match the whole line
 	"""
@@ -129,13 +138,15 @@ class LogParser(object):
 	re_eval = re.compile(r'^\s+eval\s+(.*)$')
 	re_exit = re.compile(r'^\s+exit\s*$')
 
-	def __init__(self, conf_data, debug=False, globs=None, eof_flush=False):
+	def __init__(self, conf_data, debug=False, globs=None, eof_flush=False, sample_flushes=None, lines_limit=None):
 		""" Create a LogParser instance.
 
 		conf_data: parser configuration (string or file-like object)
 		debug:     print debug messages
 		globs:     globals for assign right-term evaluation (see eval())
 		eof_flush: flush when encounter an EOF
+		sample_flushes: if not None, flushes will be sampled. Every
+		                @sample_flushes will be actually flushed.
 		"""
 		self._debug = debug
 		self._globals = globals() if globs is None else globs
@@ -144,7 +155,10 @@ class LogParser(object):
 		self._init(conf_data)
 		self._current_data = {}
 		self._eof_flush = eof_flush
+		self.sample_flushes = sample_flushes
+		self.flushes = 0
 		self._f = None
+		self._lines_limit = lines_limit
 		self.data = []
 
 	def _init(self, conf_data):
@@ -170,7 +184,7 @@ class LogParser(object):
 				self._rules.append((regex, commands))
 				continue
 
-			raise ValueError, "parse error %s (not a regexp)" % l[:-1]
+			raise ValueError("parse error %s (not a regexp)" % l[:-1])
 
 	def _init_commands(self, conf_data, initial_ws=''):
 		""" Intialize commands for a regular expression """
@@ -247,7 +261,7 @@ class LogParser(object):
 				continue
 
 			# Unknown command
-			raise ValueError, "parse error <%s> (not a valid command)" % (l[:-1],)
+			raise ValueError("parse error <%s> (not a valid command)" % (l[:-1],))
 
 		return commands
 
@@ -255,14 +269,13 @@ class LogParser(object):
 	def _compile_regex(self, regex):
 		""" wrapper for compiling regular expressions """
 		if self._debug:
-			print "got regex: %s" % regex
+			print("got regex: %s" % regex)
 		try:
 			regex = re.compile(regex)
 		except:
-			print "Failed to compile regex '%s'" % regex
+			print("Failed to compile regex '%s'" % regex)
 			raise
 		return regex
-
 
 	def _execute_commands(self, commands, match):
 		""" execute (all) commands for a match """
@@ -270,21 +283,23 @@ class LogParser(object):
 			# flush command
 			if command[0] == 'FL':
 				if self._debug:
-					print 'FLUSH'
+					print('FLUSH')
 				if self._current_data:
-					yield dict(self._current_data)
+					self.flushes += 1
+					if self.sample_flushes is None or self.flushes % self.sample_flushes == 0:
+						yield dict(self._current_data)
 			# clear command
 			elif command[0] == 'CL':
 				if self._debug:
-					print 'CLEAR',
+					print('CLEAR', end=' ')
 				# no arguments, clear all keys
 				if len(command) == 1:
 					if self._debug:
-						print 'ALL'
+						print('ALL')
 					self._current_data.clear()
 				else:
 					if self._debug:
-						print 'TERMS: ', ' '.join(command[1])
+						print('TERMS: ', ' '.join(command[1]))
 					# clear only keys in arguments
 					for term in command[1]:
 						if term in self._current_data:
@@ -305,11 +320,11 @@ class LogParser(object):
 				try:
 					rterm = eval(rterm, globs)
 				except:
-					print "FAILED to evaluate: %s = %s" % (lterm, rterm,)
+					print("FAILED to evaluate: %s = %s" % (lterm, rterm,))
 					raise
 
 				if self._debug:
-					print 'ASSIGN ', lterm, '=', rterm, '--'
+					print('ASSIGN ', lterm, '=', rterm, '--')
 				self._current_data[lterm] = rterm
 
 			# regular expression command
@@ -324,7 +339,7 @@ class LogParser(object):
 			# eval command
 			elif command[0] == 'EVAL':
 				if self._debug:
-					print 'EVAL '
+					print('EVAL ')
 				groups = match.groups()
 				cmd = command[1]
 				globs = dict(self._globals)
@@ -343,7 +358,7 @@ class LogParser(object):
 				raise StopParsing
 
 			else:
-				raise ValueError, "Unknown command: %s" % command[0]
+				raise ValueError("Unknown command: %s" % command[0])
 
 	def go_iter(self, f):
 		""" iterator that parses a file object, and yields the
@@ -353,18 +368,22 @@ class LogParser(object):
 		self._f = f # this is just used for the __finpt_obj
 
 		if self._debug:
-			print 'STARTED PARSING'
+			print('STARTED PARSING')
 
+		lines = 0
 		try:
 			while True:
 				l = f.readline()
 				if l == '':
 					break
+				lines += 1
+				if (self._lines_limit is not None) and (lines > self._lines_limit):
+					break
 				for pattern, commands in self._rules:
 					match = pattern.match(l)
 					if match is not None:
-                                                if self._debug:
-                                                    print "MATCHED: %s" % l
+						if self._debug:
+							print("MATCHED: %s" % l)
 						rets = self._execute_commands(commands, match)
 						for ret in rets:
 							yield ret
@@ -374,7 +393,7 @@ class LogParser(object):
 		if self._eof_flush:
 			yield dict(self._current_data)
 		if self._debug:
-			print 'ENDED PARSING'
+			print('ENDED PARSING')
 
 	def go(self, f):
 		""" parses a file object, and put the result in .data """
